@@ -53,7 +53,6 @@ class priorityqueue(object):
 
 try:
     from socket import socketpair
-    raise ImportError
 except ImportError:
     import socket
     def socketpair():
@@ -66,5 +65,13 @@ except ImportError:
         a.connect((host, port))
         b, _ = s.accept()
         s.close()
+        a.setblocking(0)
+        b.setblocking(0)
         return a, b
+
+def socket_pair():
+    a, b = socketpair()
+    a.setblocking(0)
+    b.setblocking(0)
+    return a, b
 

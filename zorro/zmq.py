@@ -4,6 +4,8 @@ from functools import partial
 
 from . import core
 
+DEFAULT_IO_THREADS = 1
+
 def rep_responder(sock, address, callback, data):
     hub = core.gethub()
     reply = callback(*data)
@@ -50,10 +52,26 @@ def rep_listener(sock, callback):
         hub.do_spawn(partial(rep_responder, sock, addr, callback, data))
         
 def rep_socket(callback):
+    sock = context().socket(zmq.XREP)
+    core.gethub().do_spawnloop(partial(rep_listener, sock, callback))
+    return sock
+
+def _get_fd(value):
+    if isinstance(value, zmq.Socket):
+        return value
+    else:
+        return value.fileno()
+
+def plug(hub, io_threads=DEFAULT_IO_THREADS):
+    assert not hasattr(hub, 'zmq_context')
+    ctx = hub.zmq_context = zmq.Context(io_threads)
+    hub.change_poller(zmq.Poller, filedes=_get_fd,
+        POLLIN=zmq.POLLIN, POLLOUT=zmq.POLLOUT)
+    return ctx
+
+def context():
     hub = core.gethub()
     ctx = getattr(hub, 'zmq_context', None)
     if ctx is None:
-        ctx = hub.zmq_context = zmq.Context(1)
-    sock = ctx.socket(zmq.XREP)
-    hub.do_spawnloop(partial(rep_listener, sock, callback))
-    return sock
+        return plug(hub)
+    return ctx

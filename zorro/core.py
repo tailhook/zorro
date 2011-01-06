@@ -1,12 +1,13 @@
 import greenlet
 import heapq
 import time
-import zmq
 import threading
+import select
 from collections import deque, defaultdict
 from functools import partial
+from operator import methodcaller
 
-from .util import priorityqueue, orderedset, socketpair
+from .util import priorityqueue, orderedset, socket_pair
 
 class Zorrolet(greenlet.greenlet):
     __slots__ = ('hub', 'cleanup')
@@ -22,19 +23,57 @@ class Zorrolet(greenlet.greenlet):
         del self.cleanup[:]
         return self
         
+    def __repr__(self):
+        if self.gr_frame:
+            return '<Z{:x} {}:{}>'.format(id(self),
+                self.gr_frame.f_code.co_filename, self.gr_frame.f_lineno)
+        elif isinstance(self.run, partial):
+            return '<Z{:x} {}>'.format(id(self),
+                getattr(self.run.func, '__name__', self.run.func))
+        else:
+            return '<Z{:x} {}>'.format(id(self),
+                getattr(self.run, '__name__', self.run))
+        
 class Hub(object):
     def __init__(self):
         self._queue = orderedset()
-        self._poller = zmq.Poller()
+        try:
+            self._poller = select.epoll()
+            self.POLLIN = select.EPOLLIN
+            self.POLLOUT = select.EPOLLOUT
+        except AttributeError:
+            self._poller = select.poll()
+            self.POLLIN = select.POLLIN
+            self.POLLOUT = select.EPOLLOUT
+        self._filedes = methodcaller('fileno')
         self._timeouts = priorityqueue()
         self._in_sockets = defaultdict(list)
         self._out_sockets = defaultdict(list)
         self._loops = set()
-        self._control = socketpair()
-        self._poller.register(self._control[0], zmq.POLLIN)
+        self._control = socket_pair()
+        self._poller.register(self._control[0], self.POLLIN)
         self._control_fd = self._control[0].fileno()
     
     # global methods
+    
+    def change_poller(self, cls, POLLIN, POLLOUT,
+        filedes=methodcaller('fileno')):
+        if hasattr(self._poller, 'close'):
+            self._poller.close()
+        self._poller = cls()
+        self.POLLIN = POLLIN
+        self.POLLOUT = POLLOUT
+        self._filedes = filedes
+        for k in set(self._in_sockets).union(self._out_sockets):
+            msk = 0
+            if k in self._in_sockets:
+                msk |= POLLIN
+            elif k in self._out_sockets:
+                msk |= POLLOUT
+            self._poller.register(k, msk)
+        if hasattr(self, '_control'):
+            self._poller.register(self._control[0], self.POLLIN)
+            self._control_fd = self._control[0].fileno()
     
     def wakeup(self):
         self._control[1].send(b'x')
@@ -70,12 +109,15 @@ class Hub(object):
         self.stopped = True
     
     # Internals
+    
     def queue(self):
         while not self.stopped:
             tsk = self._queue.first()
             if tsk is None:
                 return
-            tsk[0].detach().switch(*tsk[1:])
+            t = tsk[0]
+            t.detach()
+            t.switch(*tsk[1:])
     
     def io(self):
         timeo = self._timeouts.min()
@@ -87,11 +129,11 @@ class Hub(object):
         if not items:
             return False
         for fd, ev in items:
-            if ev & zmq.POLLOUT:
+            if ev & self.POLLOUT:
                 if fd in self._out_sockets:
                     task = self._out_sockets[fd][0]
                     self.queue_task(task, 'read')
-            if ev & zmq.POLLIN:
+            if ev & self.POLLIN:
                 if fd in self._in_sockets:
                     task = self._in_sockets[fd][0]
                     self.queue_task(task, 'write')
@@ -126,20 +168,17 @@ class Hub(object):
     def _check_mask(self, fd):
         msk = 0
         if fd in self._in_sockets:
-            msk |= zmq.POLLIN
+            msk |= self.POLLIN
         if fd in self._out_sockets:
-            msk |= zmq.POLLOUT
+            msk |= self.POLLOUT
         if msk:
-            self._poller.register(fd, msk)
+            self._poller.modify(fd, msk)
         else:
             self._poller.unregister(fd)
     
     def _queue_sock(self, sock, dic, more=False):
         let = greenlet.getcurrent()
-        if isinstance(sock, zmq.Socket):
-            fd = sock
-        else:
-            fd = sock.fileno()
+        fd = self._filedes(sock)
         def deque_sock(let):
             items.remove(let)
             if not items:
