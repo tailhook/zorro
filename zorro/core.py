@@ -46,7 +46,7 @@ class Hub(object):
             self.wakeup()
         else:
             while self._loops:
-                self._loops.pop().detach().throw(GeneratorExit())
+                self._loops.pop().detach().throw(greenlet.GreenletExit())
     
     def crash(self):
         """Rude stop of hub at next iteration"""
@@ -166,8 +166,6 @@ class Hub(object):
             self._loops.add(let)
             try:
                 fun()
-            except GeneratorExit:
-                pass
             finally:
                 self._loops.discard(let) # could be removed by hub.stop()
         self.do_spawn(_spawnloop)
