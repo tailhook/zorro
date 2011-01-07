@@ -52,12 +52,12 @@ class BigTest(Redis):
     @passive
     def test_time(self):
         def get100():
-            for i in range(25):
+            for i in range(100):
                 self.r.execute('GET', 'test:key1')
         import time
         old = time.time()
         f = []
-        for i in range(400):
+        for i in range(100):
             f.append(self.z.Future(get100))
         for i in f:
             i.get()

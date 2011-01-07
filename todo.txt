@@ -1,3 +1,5 @@
- * add `multithreaded` hub option
+ * add some logging to hub
  * implement other zmq socket types
+ * implement hub with debugging log
+ * add `multithreaded` hub option
  * think about waiting multiple events in single greenlet

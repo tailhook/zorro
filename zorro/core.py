@@ -97,7 +97,6 @@ class Hub(object):
 
     def stop(self):
         """Stop all services, and wait for other tasks to complete"""
-        print("STOP")
         self.stopping = True
         if threading.current_thread().ident != self._thread:
             self.wakeup()
