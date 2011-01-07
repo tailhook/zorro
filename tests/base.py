@@ -7,35 +7,28 @@ def interactive(zfun):
     def wrapper(fun):
         @wraps(fun)
         def wrapping(self, *a, **kw):
-            myhub = self.z.Hub()
-            thread = threading.Thread(target=myhub.run,
-                args=(partial(zfun, self, *a, **kw),))
-            thread.start()
+            self.hub.add_task(partial(zfun, self, *a, **kw))
+            self.thread.start()
             fun(self, *a, **kw)
-            myhub.stop()
-            thread.join(self.test_timeout)
-            if thread.is_alive():
-                try:
-                    raise AssertionError("test timed out")
-                finally:
-                    myhub.crash()
-                    thread.join()
         return wrapping
     return wrapper
-    
+
 def passive(zfun):
     @wraps(zfun)
     def wrapping(self, *a, **kw):
-        myhub = zorro.Hub(partial(zfun, self, *a, **kw))
-        thread = threading.Thread(target=myhub.run)
-        thread.start()
-        thread.join(self.test_timeout)
-        if thread.is_alive():
+        exc = []
+        def catch():
             try:
-                raise AssertionError("test timed out")
-            finally:
-                myhub.crash()
-                thread.join()
+                zfun(self, *a, **kw)
+            except BaseException as e:
+                exc.append(e)
+        self.hub.add_task(catch)
+        self.thread.start()
+        try:
+            self.thread.join(self.test_timeout)
+        finally:
+            if exc:
+                raise exc[0]
     return wrapping
 
 class Test(unittest.TestCase):
@@ -45,9 +38,20 @@ class Test(unittest.TestCase):
         import zorro
         from zorro import zmq, redis
         self.z = zorro
-    
+        self.hub = self.z.Hub()
+        self.thread = threading.Thread(target=self.hub.run)
+
     def tearDown(self):
+        if not self.hub.stopping:
+            self.hub.stop()
+        self.thread.join(self.test_timeout)
+        if self.thread.is_alive():
+            try:
+                raise AssertionError("test timed out")
+            finally:
+                self.hub.crash()
+                self.thread.join()
         for key in list(sys.modules.keys()):
             if key == 'zorro' or key.startswith('zorro.'):
                 del sys.modules[key]
-        
+

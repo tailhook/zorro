@@ -1,1 +1,6 @@
  * add `multithreaded` hub option
+ * implement other zmq socket types
+ * think about waiting multiple events in single greenlet
+ * better means of unneeded greenlets in mainloop:
+   * should exit when channels active
+   * whould exit when loops (like rep_socket) active
