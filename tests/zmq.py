@@ -18,3 +18,6 @@ class TestZeromq(Test):
         sock.send_multipart([b"hello", b"world"])
         self.assertEquals(sock.recv_multipart(), [b"world", b"hello"])
 
+if __name__ == '__main__':
+    import unittest
+    unittest.main()

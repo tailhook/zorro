@@ -9,8 +9,8 @@ class PipelinedReqChannel(object):
         self._cur_producing = []
         self._cond = Condition()
         hub = gethub()
-        hub.do_spawnloop(self.sender)
-        hub.do_spawnloop(self.receiver)
+        hub.do_spawnhelper(self.sender)
+        hub.do_spawnhelper(self.receiver)
 
     def produce(self, value):
         val = self._cur_producing.append(value)

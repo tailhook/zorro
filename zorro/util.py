@@ -2,52 +2,55 @@ from heapq import heappush, heappop
 from collections import deque
 
 class orderedset(object):
-    
+
     def __init__(self):
         self.deque = deque()
-    
+
     def add(self, *val):
         self.deque.append(val)
         def remover(*a):
             self.deque.remove(val)
         return remover
-    
+
     def update(self, value):
         self.deque.extend(value)
-    
+
     def first(self):
         if self.deque:
             return self.deque[0]
         return None
-    
+
     def remove(self, value):
         self.deque.remove(value)
 
+    def __bool__(self):
+        return bool(self.deque)
+
 class priorityqueue(object):
-    
+
     def __init__(self):
         self.heap = []
-        
+
     def add(self, pri, task):
         item = [pri, task]
         heappush(self.heap, item)
         def remover(*a):
             item[1] = None
         return remover
-    
+
     def min(self):
         while self.heap and self.heap[0][1] is None:
             heappop(self.heap)
         if self.heap:
             return self.heap[0][0]
         return None
-    
+
     def pop(self, value):
         val = self.min()
         if val is not None and val <= value:
             return self.heap[0][1]
         return None
-    
+
     def __bool__(self):
         return bool(self.heap)
 

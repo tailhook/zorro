@@ -47,7 +47,8 @@ class Test(unittest.TestCase):
         self.thread.join(self.test_timeout)
         if self.thread.is_alive():
             try:
-                raise AssertionError("test timed out")
+                if not getattr(self, 'should_timeout', False):
+                    raise AssertionError("test timed out")
             finally:
                 self.hub.crash()
                 self.thread.join()

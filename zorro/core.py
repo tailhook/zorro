@@ -3,11 +3,21 @@ import heapq
 import time
 import threading
 import select
+import weakref
 from collections import deque, defaultdict
 from functools import partial
 from operator import methodcaller
 
 from .util import priorityqueue, orderedset, socket_pair
+
+__all__ = [
+    'Zorrolet',
+    'Hub',
+    'gethub',
+    'Future',
+    'Condition',
+    'Lock',
+    ]
 
 class Zorrolet(greenlet.greenlet):
     __slots__ = ('hub', 'cleanup')
@@ -27,12 +37,16 @@ class Zorrolet(greenlet.greenlet):
         if self.gr_frame:
             return '<Z{:x} {}:{}>'.format(id(self),
                 self.gr_frame.f_code.co_filename, self.gr_frame.f_lineno)
-        elif isinstance(self.run, partial):
-            return '<Z{:x} {}>'.format(id(self),
-                getattr(self.run.func, '__name__', self.run.func))
+        elif self.dead:
+            return '<Z{:x} dead>'.format(id(self))
         else:
-            return '<Z{:x} {}>'.format(id(self),
-                getattr(self.run, '__name__', self.run))
+            r = getattr(self, 'run', None)
+            if isinstance(r, partial):
+                return '<Z{:x} {}>'.format(id(self),
+                    getattr(r.func, '__name__', r.func))
+            else:
+                return '<Z{:x} {}>'.format(id(self),
+                    getattr(r, '__name__', r))
 
 class Hub(object):
     def __init__(self):
@@ -49,11 +63,13 @@ class Hub(object):
         self._timeouts = priorityqueue()
         self._in_sockets = defaultdict(list)
         self._out_sockets = defaultdict(list)
-        self._loops = set()
         self._control = socket_pair()
         self._poller.register(self._control[0], self.POLLIN)
         self._control_fd = self._control[0].fileno()
         self._start_tasks = []
+        self._services = weakref.WeakKeyDictionary()
+        self._tasks = weakref.WeakKeyDictionary()
+        self._helpers = weakref.WeakKeyDictionary()
 
     # global methods
 
@@ -80,13 +96,22 @@ class Hub(object):
         self._control[1].send(b'x')
 
     def stop(self):
-        """Stop all infinite loops, and wait for other tasks to complete"""
+        """Stop all services, and wait for other tasks to complete"""
+        print("STOP")
         self.stopping = True
         if threading.current_thread().ident != self._thread:
             self.wakeup()
         else:
-            while self._loops:
-                self._loops.pop().detach().throw(greenlet.GreenletExit())
+            self.shutdown_tasks(self._services, self._tasks)
+
+    def shutdown_tasks(self, src, tgt):
+        for i in list(src.keys()):
+            del src[i]
+            tgt[i] = None
+            try:
+                i.detach().throw(greenlet.GreenletExit())
+            except BaseException as e:
+                self.log_exception(e)
 
     def crash(self):
         """Rude stop of hub at next iteration"""
@@ -104,13 +129,27 @@ class Hub(object):
         del self._start_tasks
         for f in tasks:
             self.do_spawn(f)
-        while self.queue() or self.io() or self.timeouts():
+        while True:
+            self.queue()
+            self.timeouts()
+
             if self.stopped:
                 break
-            elif self.stopping and self._loops:
-                self.stop()
+            elif self.stopping and self._services:
+                self.shutdown_tasks(self._services, self._tasks)
+            elif not self._tasks and not self._services and self._helpers:
+                self.shutdown_tasks(self._helpers, self._tasks)
+            if not self._tasks and not self._services:
+                break
+
+            if not self._queue:
+                self.io()
+
         self.stopping = True
         self.stopped = True
+
+    def log_exception(self, e):
+        print('EXCEPTION', e) # TODO
 
     # Internals
 
@@ -121,19 +160,18 @@ class Hub(object):
                 return
             t = tsk[0]
             t.detach()
-            t.switch(*tsk[1:])
+            try:
+                t.switch(*tsk[1:])
+            except BaseException as e:
+                self.log_exception(e)
 
     def io(self):
         timeo = self._timeouts.min()
-        if timeo is None and not self._in_sockets and not self._out_sockets:
-            return False
         if timeo is not None:
             timeo = max(timeo - time.time(), 0)
         else:
             timeo = -1
         items = self._poller.poll(timeout=timeo)
-        if not items:
-            return False
         for fd, ev in items:
             if ev & self.POLLOUT:
                 if fd in self._out_sockets:
@@ -145,18 +183,16 @@ class Hub(object):
                     self.queue_task(task, 'write')
                 elif fd == self._control_fd:
                     self._control[0].recv(1024) # throw it, just need wake up
-        return True
 
     def timeouts(self):
         if not self._timeouts:
-            return False
+            return
         now = time.time()
         while True:
             task = self._timeouts.pop(now)
             if task is None:
                 break
             self.queue_task(task, 'timeout')
-        return True
 
     def queue_task(self, task, *value):
         task.detach()
@@ -168,6 +204,7 @@ class Hub(object):
         targ = time.time() + tm
         let = greenlet.getcurrent()
         let.cleanup.append(self._timeouts.add(targ, let))
+        del let # no cycles
         if not more:
             self._self.switch()
 
@@ -185,17 +222,18 @@ class Hub(object):
             self._poller.unregister(fd)
 
     def _queue_sock(self, sock, dic, odic, more=False):
-        let = greenlet.getcurrent()
         fd = self._filedes(sock)
         def deque_sock(let):
             items.remove(let)
             if not items:
                 del dic[fd]
             self._check_mask(fd)
+        let = greenlet.getcurrent()
         let.cleanup.append(deque_sock)
         items = dic[fd]
         items.append(let)
         self._check_mask(fd, new=len(items) == 1 and fd not in odic)
+        del let
         if not more:
             self._self.switch()
 
@@ -205,23 +243,25 @@ class Hub(object):
     def do_write(self, sock, more=False):
         self._queue_sock(sock, self._out_sockets, self._in_sockets, more=more)
 
-    def do_spawnloop(self, fun):
+    def do_spawnservice(self, fun):
         if self.stopping:
-            raise RuntimeError("Trying to spawn a loop while stopping")
-        def _spawnloop():
-            let = greenlet.getcurrent()
-            self._loops.add(let)
-            try:
-                fun()
-            finally:
-                self._loops.discard(let) # could be removed by hub.stop()
-        self.do_spawn(_spawnloop)
+            raise RuntimeError("Trying to spawn a service while stopping")
+        let = Zorrolet(fun, self)
+        self._services[let] = None
+        self.queue_task(let)
+
+    def do_spawn(self, fun):
+        let = Zorrolet(fun, self)
+        self._tasks[let] = None
+        self.queue_task(let)
+
+    def do_spawnhelper(self, fun):
+        let = Zorrolet(fun, self)
+        self._helpers[let] = None
+        self.queue_task(let)
 
     def add_task(self, fun):
         self._start_tasks.append(fun)
-
-    def do_spawn(self, fun):
-        return self.queue_task(Zorrolet(fun, self))
 
 
 def gethub():
@@ -242,11 +282,17 @@ class Condition(object):
         cur = greenlet.getcurrent()
         cur.cleanup.append(self._queue.remove)
         self._queue.append(cur)
-        cur.hub._self.switch()
+        hub = cur.hub
+        del cur # no cycles
+        hub._self.switch()
 
 class Future(object):
-    def __init__(self):
+    def __init__(self, fun=None):
         self._listeners = []
+        if fun is not None:
+            def future():
+                self.set(fun())
+            gethub().do_spawn(future)
 
     def get(self):
         if hasattr(self, '_value'):
@@ -254,7 +300,9 @@ class Future(object):
         cur = greenlet.getcurrent()
         cur.cleanup.append(self._listeners.remove)
         self._listeners.append(cur)
-        cur.hub._self.switch()
+        hub = cur.hub
+        del cur # no cycles
+        hub._self.switch()
         return self._value
 
     def set(self, value):
@@ -268,3 +316,23 @@ class Future(object):
 
     def check(self, value):
         return hasattr(self, '_value')
+
+class Lock(Condition):
+    def __init__(self):
+        super().__init__()
+        self._locked = False
+
+    def acquire(self):
+        while self._locked:
+            self.wait()
+        self._locked = True
+
+    def release(self):
+        self._locked = False
+        self.notify()
+
+    def __enter__(self):
+        self.acquire()
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        self.release()

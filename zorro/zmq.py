@@ -50,10 +50,10 @@ def rep_listener(sock, callback):
         addr = data[:i+1]
         data = data[i+1:]
         hub.do_spawn(partial(rep_responder, sock, addr, callback, data))
-        
+
 def rep_socket(callback):
     sock = context().socket(zmq.XREP)
-    core.gethub().do_spawnloop(partial(rep_listener, sock, callback))
+    core.gethub().do_spawnservice(partial(rep_listener, sock, callback))
     return sock
 
 def _get_fd(value):

@@ -1,4 +1,4 @@
-from .core import gethub
+from .core import gethub, Lock
 from . import channel
 import socket
 import errno
@@ -31,6 +31,9 @@ def encode_command(buf, parts):
         add(value)
         add(b'\r\n')
     return buf
+
+class RedisError(Exception):
+    pass
 
 class RedisChannel(channel.PipelinedReqChannel):
     BUFSIZE = 16384
@@ -130,7 +133,7 @@ class RedisChannel(channel.PipelinedReqChannel):
             ch = readchar()
             if ch == 42: # b'*'
                 cnt = int(readline())
-                return [readone(it) for i in cnt]
+                return [readone() for i in range(cnt)]
             elif ch == 43: # b'+'
                 return readline().decode('ascii')
             elif ch == 45: # b'-'
@@ -139,6 +142,8 @@ class RedisChannel(channel.PipelinedReqChannel):
                 return int(readline())
             elif ch == 36: # b'$'
                 ln = int(readline())
+                if ln < 0:
+                    return None
                 res = readslice(ln)
                 assert readline() == b''
                 return res
@@ -156,23 +161,31 @@ class Redis(object):
         self.port = port
         self.db = db
         self._channel = None
+        self._channel_lock = Lock()
 
     # low-level stuff
     def execute(self, *args):
         if not self._channel:
-            self._channel = RedisChannel(self.host, self.port, self.db)
+            with self._channel_lock:
+                if not self._channel:
+                    self._channel = RedisChannel(self.host, self.port, self.db)
         buf = bytearray()
         encode_command(buf, args)
         return self._channel.request(buf)
 
     def pipeline(self, commands):
+        if not self._channel:
+            self._channel = RedisChannel(self.host, self.port, self.db)
         for cmd in commands:
             encode_command(buf, cmd)
         return self._channel.request(buf, len(commands))
 
     def bulk(self, commands):
-        assert commands[0] == 'MULTI' and commands[-1] in ('EXEC', 'DISCARD'),\
+        if not self._channel:
+            self._channel = RedisChannel(self.host, self.port, self.db)
+        assert commands[0][0] == 'MULTI' and commands[-1][0] in ('EXEC', 'DISCARD'),\
             commands
+        buf = bytearray()
         for cmd in commands:
             encode_command(buf, cmd)
         val = self._channel.request(buf, len(commands))
