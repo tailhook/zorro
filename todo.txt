@@ -1,4 +1,3 @@
- * add some logging to hub
  * implement other zmq socket types
  * implement hub with debugging log
  * add `multithreaded` hub option

@@ -4,6 +4,7 @@ import time
 import threading
 import select
 import weakref
+import logging
 from collections import deque, defaultdict
 from functools import partial
 from operator import methodcaller
@@ -59,6 +60,7 @@ class Hub(object):
             self._poller = select.poll()
             self.POLLIN = select.POLLIN
             self.POLLOUT = select.EPOLLOUT
+            self._log.info("Using poller %r", self._poller)
         self._filedes = methodcaller('fileno')
         self._timeouts = priorityqueue()
         self._in_sockets = defaultdict(list)
@@ -70,11 +72,14 @@ class Hub(object):
         self._services = weakref.WeakKeyDictionary()
         self._tasks = weakref.WeakKeyDictionary()
         self._helpers = weakref.WeakKeyDictionary()
+        self._log = logging.getLogger('zorro.hub.{:x}'.format(id(self)))
 
     # global methods
 
     def change_poller(self, cls, POLLIN, POLLOUT,
         filedes=methodcaller('fileno')):
+        self._log.info("Changing poller from %r to %r",
+            self._poller.__class__, cls)
         if hasattr(self._poller, 'close'):
             self._poller.close()
         self._poller = cls()
@@ -97,6 +102,8 @@ class Hub(object):
 
     def stop(self):
         """Stop all services, and wait for other tasks to complete"""
+        self._log.warn("Stop called from thread ``%s'' and %r",
+            threading.current_thread().name, greenlet.getcurrent())
         self.stopping = True
         if threading.current_thread().ident != self._thread:
             self.wakeup()
@@ -114,6 +121,8 @@ class Hub(object):
 
     def crash(self):
         """Rude stop of hub at next iteration"""
+        self._log.warn("Crash called from thread ``%s'' and %r",
+            threading.current_thread().name, greenlet.getcurrent())
         self.stopped = True
         if threading.current_thread().ident != self._thread:
             self.wakeup()
@@ -123,6 +132,8 @@ class Hub(object):
         self.stopped = False
         self._self = greenlet.getcurrent()
         self._thread = threading.current_thread().ident
+        self._log.warn("Starting in thread ``%s'' and %r",
+            threading.current_thread().name, self._self)
         for f in self._start_tasks:
             self.do_spawn(f)
         del self._start_tasks
@@ -133,10 +144,13 @@ class Hub(object):
             self.timeouts()
 
             if self.stopped:
+                self._log.warn("Breaking main loop")
                 break
             elif self.stopping and self._services:
+                self._log.warn("Stopping services")
                 self.shutdown_tasks(self._services, self._tasks)
             elif not self._tasks and not self._services and self._helpers:
+                self._log.warn("No more active tasks, stopping helpers")
                 self.shutdown_tasks(self._helpers, self._tasks)
             if not self._tasks and not self._services:
                 break
@@ -144,11 +158,17 @@ class Hub(object):
             if not self._queue:
                 self.io()
 
+        self._log.warn("Hub stopped")
         self.stopping = True
         self.stopped = True
 
+    # Logging methods
+
+    def log_plugged(self, plugin, name):
+        self._log.info("Plugged in %r under the name %r", plugin, name)
+
     def log_exception(self, e):
-        print('EXCEPTION', e) # TODO
+        self._log.error("Exception in one of spawned tasks", exc_info=e)
 
     # Internals
 

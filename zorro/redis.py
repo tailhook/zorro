@@ -6,6 +6,7 @@ import errno
 def plug(hub, *a, name='default', **kw):
     redis = Redis(*a, **kw)
     setattr(hub, 'redis_' + name, redis)
+    hub.log_plugged(redis, name='redis_'+name)
     return redis
 
 def redis(name='default'):
