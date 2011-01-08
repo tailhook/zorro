@@ -2,7 +2,7 @@ import zmq
 import errno
 from functools import partial
 
-from . import core
+from . import core, channel
 
 DEFAULT_IO_THREADS = 1
 
@@ -55,6 +55,40 @@ def rep_socket(callback):
     sock = context().socket(zmq.XREP)
     core.gethub().do_spawnservice(partial(rep_listener, sock, callback))
     return sock
+
+def req_socket():
+    return ReqChannel()
+
+class ReqChannel(channel.MuxReqChannel):
+
+    def __init__(self):
+        super().__init__()
+        self._sock = context().socket(zmq.XREQ)
+
+    def bind(self, value):
+        self._sock.bind(value)
+
+    def connect(self, value):
+        self._sock.connect(value)
+
+    def sender(self):
+        wait_write = core.gethub().do_write
+        while True:
+            wait_write(self._sock)
+            id, data = self.peek_request()
+            self._sock.send(id, zmq.SNDMORE)
+            self._sock.send(b"", zmq.SNDMORE)
+            self._sock.send_multipart(data)
+            self.pop_request()
+
+    def receiver(self):
+        wait_read = core.gethub().do_read
+        while True:
+            wait_read(self._sock)
+            data = self._sock.recv_multipart()
+            assert data[1] == b''
+            self.produce(data[0], data[2:])
+
 
 def _get_fd(value):
     if isinstance(value, zmq.Socket):
