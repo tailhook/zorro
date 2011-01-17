@@ -11,9 +11,9 @@ def rep_responder(sock, address, callback, data):
     reply = callback(*data)
     _rep = address
     if isinstance(reply, bytes):
-        _rep.append(bytes)
+        _rep.append(reply)
     elif isinstance(reply, str):
-        _rep.append(bytes.encode('utf-8'))
+        _rep.append(reply.encode('utf-8'))
     elif reply is None:
         raise RuntimeError("Replier callback must return either string,"
             " bytes or sequence of strings or bytes")

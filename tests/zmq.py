@@ -18,6 +18,26 @@ class TestZeromq(Test):
         sock.send_multipart([b"hello", b"world"])
         self.assertEquals(sock.recv_multipart(), [b"world", b"hello"])
 
+    def replieru(self, a):
+        if a == b'a':
+            return "hello"
+        else:
+            return b"world"
+
+    def setup_replyu(self):
+        sock = self.z.zmq.rep_socket(self.replieru)
+        sock.connect('tcp://127.0.0.1:9999')
+
+    @interactive(setup_replyu)
+    def test_repu(self):
+        ctx = zmq.Context(1)
+        sock = ctx.socket(zmq.REQ)
+        sock.bind('tcp://127.0.0.1:9999')
+        sock.send_multipart([b"a"])
+        self.assertEquals(sock.recv_multipart(), [b"hello"])
+        sock.send_multipart([b"b"])
+        self.assertEquals(sock.recv_multipart(), [b"world"])
+
     def make_request(self):
         sock = self.z.zmq.req_socket()
         sock.bind('tcp://127.0.0.1:9999')
