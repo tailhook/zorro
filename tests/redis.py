@@ -57,7 +57,7 @@ class BigTest(Redis):
         import time
         old = time.time()
         f = []
-        for i in range(100):
+        for i in range(200):
             f.append(self.z.Future(get100))
         for i in f:
             i.get()

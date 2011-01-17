@@ -18,8 +18,8 @@ def redis(name='default'):
 convert = {
     str: lambda a: a.encode('utf-8'),
     bytes: lambda a: a,
-    int: lambda a: bytes(str(a)),
-    float: lambda a: bytes(repr(a)),
+    int: lambda a: bytes(str(a), 'utf-8'),
+    float: lambda a: bytes(repr(a), 'utf-8'),
     }
 
 def encode_command(buf, parts):
@@ -50,7 +50,9 @@ class RedisChannel(channel.PipelinedReqChannel):
                 gethub().do_write(self._sock)
             else:
                 raise
-        self.request('SELECT %d\r\n'.format(db).encode('ascii'))
+        db = str(db)
+        assert self.request('*2\r\n$6\r\nSELECT\r\n${0}\r\n{1}\r\n'
+            .format(len(db), db).encode('ascii')) == 'OK'
 
     def sender(self):
         buf = bytearray()
