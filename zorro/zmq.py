@@ -24,11 +24,13 @@ def rep_responder(sock, address, callback, data):
             else:
                 _rep.append(a)
     while True:
-        hub.do_write(sock)
         try:
             sock.send_multipart(_rep, zmq.NOBLOCK)
         except zmq.ZMQError as e:
-            if e.errno == errno.EAGAIN or e.errno == errno.EINTR:
+            if e.errno == errno.EAGAIN:
+                hub.do_write(sock)
+                continue
+            elif e.errno == errno.EINTR:
                 continue
             else:
                 raise
