@@ -1,4 +1,5 @@
 import zmq
+from zmq import *
 import errno
 from functools import partial
 
@@ -6,23 +7,16 @@ from . import core, channel
 
 DEFAULT_IO_THREADS = 1
 
-def rep_responder(sock, address, callback, data):
-    hub = core.gethub()
-    reply = callback(*data)
-    _rep = address
-    if isinstance(reply, bytes):
-        _rep.append(reply)
-    elif isinstance(reply, str):
-        _rep.append(reply.encode('utf-8'))
-    elif reply is None:
-        raise RuntimeError("Replier callback must return either string,"
-            " bytes or sequence of strings or bytes")
+def send_data(sock, *data, address=None):
+    if address is None:
+        _rep = []
     else:
-        for a in reply:
-            if isinstance(a, str):
-                _rep.append(a.encode('utf-8'))
-            else:
-                _rep.append(a)
+        _rep = list(address)
+    for a in data:
+        if isinstance(a, str):
+            _rep.append(a.encode('utf-8'))
+        else:
+            _rep.append(a)
     while True:
         try:
             sock.send_multipart(_rep, zmq.NOBLOCK)
@@ -36,6 +30,20 @@ def rep_responder(sock, address, callback, data):
                 raise
         else:
             break
+
+
+def rep_responder(sock, address, callback, data):
+    hub = core.gethub()
+    reply = callback(*data)
+    if isinstance(reply, bytes):
+        send_data(sock, reply, address=address)
+    elif isinstance(reply, str):
+        send_data(sock, reply.encode('utf-8'), address=address)
+    elif reply is None:
+        raise RuntimeError("Replier callback must return either string,"
+            " bytes or sequence of strings or bytes")
+    else:
+        send_data(sock, *reply, address=address)
 
 def rep_listener(sock, callback):
     hub = core.gethub()
@@ -57,6 +65,27 @@ def rep_socket(callback):
     sock = context().socket(zmq.XREP)
     core.gethub().do_spawnservice(partial(rep_listener, sock, callback))
     return sock
+
+def sub_listener(sock, callback):
+    hub = core.gethub()
+    while True:
+        hub.do_read(sock)
+        try:
+            data = sock.recv_multipart(zmq.NOBLOCK)
+        except zmq.ZMQError as e:
+            if e.errno == errno.EAGAIN or e.errno == errno.EINTR:
+                continue
+            else:
+                raise
+        hub.do_spawn(partial(callback, *data))
+
+def sub_socket(callback):
+    sock = context().socket(zmq.SUB)
+    core.gethub().do_spawnservice(partial(sub_listener, sock, callback))
+    return sock
+
+def pub_socket():
+    return PubChannel()
 
 def req_socket():
     return ReqChannel()
@@ -90,6 +119,21 @@ class ReqChannel(channel.MuxReqChannel):
             data = self._sock.recv_multipart()
             assert data[1] == b''
             self.produce(data[0], data[2:])
+
+class PubChannel(object):
+
+    def __init__(self):
+        super().__init__()
+        self._sock = context().socket(zmq.PUB)
+
+    def bind(self, value):
+        self._sock.bind(value)
+
+    def connect(self, value):
+        self._sock.connect(value)
+
+    def publish(self, *args):
+        send_data(self._sock, *args)
 
 
 def _get_fd(value):

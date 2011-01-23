@@ -56,6 +56,30 @@ class TestZeromq(Test):
         data = sock.recv_multipart()
         sock.send_multipart(list(reversed(data)))
 
+    def subscriber(self, *words):
+        if len(words) < 5:
+            self.pub.publish('real', *words)
+        else:
+            self.pub2.publish(repr(words))
+
+    @passive
+    def test_pubsub(self):
+        sock = self.z.zmq.sub_socket(self.subscriber)
+        sock.bind('tcp://127.0.0.1:9999')
+        sock.setsockopt(self.z.zmq.SUBSCRIBE, b"")
+        self.z.sleep(0.1)
+        self.pub = self.z.zmq.pub_socket()
+        self.pub.connect('tcp://127.0.0.1:9999')
+        self.pub.publish('hello', 'world')
+        f = self.z.Future()
+        sock = self.z.zmq.sub_socket(f.set)
+        sock.bind('tcp://127.0.0.1:9998')
+        sock.setsockopt(self.z.zmq.SUBSCRIBE, b"")
+        self.pub2 = self.z.zmq.pub_socket()
+        self.pub2.connect('tcp://127.0.0.1:9998')
+        self.assertEquals(f.get(),
+            b"(b'real', b'real', b'real', b'hello', b'world')")
+
 if __name__ == '__main__':
     import unittest
     unittest.main()
