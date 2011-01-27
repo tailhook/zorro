@@ -18,6 +18,7 @@ def redis(name='default'):
 convert = {
     str: lambda a: a.encode('utf-8'),
     bytes: lambda a: a,
+    bytearray: lambda a: a,
     int: lambda a: bytes(str(a), 'utf-8'),
     float: lambda a: bytes(repr(a), 'utf-8'),
     }
@@ -69,7 +70,7 @@ class RedisChannel(channel.PipelinedReqChannel):
             try:
                 bytes = self._sock.send(buf)
             except socket.error as e:
-                if e.errno in errno.EAGAIN:
+                if e.errno in (errno.EAGAIN, errno.EINTR):
                     continue
                 else:
                     raise
@@ -97,7 +98,7 @@ class RedisChannel(channel.PipelinedReqChannel):
                         raise EOFError()
                     add_chunk(bytes)
                 except socket.error as e:
-                    if e.errno == errno.EAGAIN or e.errno == errno.EINTR:
+                    if e.errno in (errno.EAGAIN, errno.EINTR):
                         continue
                     else:
                         raise
@@ -112,12 +113,14 @@ class RedisChannel(channel.PipelinedReqChannel):
             return c
 
         def readline():
-            npos = pos[0]
+            off = 0
+            if len(buf) < 2 or pos[0] >= len(buf):
+                readmore()
             while True:
                 try:
-                    idx = buf.index(b'\r\n', npos)
+                    idx = buf.index(b'\r\n', pos[0] + off)
                 except ValueError:
-                    npos = max(0, len(buf) - 2)
+                    off = max(0, len(buf) - 2) - pos[0]
                     readmore()
                 else:
                     break
