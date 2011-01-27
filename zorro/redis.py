@@ -113,17 +113,16 @@ class RedisChannel(channel.PipelinedReqChannel):
             return c
 
         def readline():
-            off = 0
             if len(buf) < 2 or pos[0] >= len(buf):
                 readmore()
             while True:
                 try:
-                    idx = buf.index(b'\r\n', pos[0] + off)
+                    idx = buf.index(b'\r\n', pos[0])
                 except ValueError:
-                    off = max(0, len(buf) - 2) - pos[0]
-                    readmore()
+                    pass
                 else:
                     break
+                readmore()
             res = buf[pos[0]:idx]
             pos[0] = idx + 2
             return res
@@ -196,7 +195,7 @@ class Redis(object):
             encode_command(buf, cmd)
         val = self._channel.request(buf, len(commands))
         if val[0] != 'OK':
-            raise RuntimeError()
+            raise RuntimeError(val, commands)
         for i in val[1:-1]:
             if isinstance(i, RedisError):
                 raise i
