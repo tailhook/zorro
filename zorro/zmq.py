@@ -49,17 +49,18 @@ def rep_listener(sock, callback):
     hub = core.gethub()
     while True:
         hub.do_read(sock)
-        try:
-            data = sock.recv_multipart(zmq.NOBLOCK)
-        except zmq.ZMQError as e:
-            if e.errno == errno.EAGAIN or e.errno == errno.EINTR:
-                continue
-            else:
-                raise
-        i = data.index(b'')
-        addr = data[:i+1]
-        data = data[i+1:]
-        hub.do_spawn(partial(rep_responder, sock, addr, callback, data))
+        while True:
+            try:
+                data = sock.recv_multipart(zmq.NOBLOCK)
+            except zmq.ZMQError as e:
+                if e.errno == errno.EAGAIN or e.errno == errno.EINTR:
+                    break
+                else:
+                    raise
+            i = data.index(b'')
+            addr = data[:i+1]
+            data = data[i+1:]
+            hub.do_spawn(partial(rep_responder, sock, addr, callback, data))
 
 def rep_socket(callback):
     sock = context().socket(zmq.XREP)
@@ -70,14 +71,15 @@ def sub_listener(sock, callback):
     hub = core.gethub()
     while True:
         hub.do_read(sock)
-        try:
-            data = sock.recv_multipart(zmq.NOBLOCK)
-        except zmq.ZMQError as e:
-            if e.errno == errno.EAGAIN or e.errno == errno.EINTR:
-                continue
-            else:
-                raise
-        hub.do_spawn(partial(callback, *data))
+        while True:
+            try:
+                data = sock.recv_multipart(zmq.NOBLOCK)
+            except zmq.ZMQError as e:
+                if e.errno == errno.EAGAIN or e.errno == errno.EINTR:
+                    break
+                else:
+                    raise
+            hub.do_spawn(partial(callback, *data))
 
 def sub_socket(callback):
     sock = context().socket(zmq.SUB)
