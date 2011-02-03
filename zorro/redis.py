@@ -44,6 +44,7 @@ class RedisChannel(channel.PipelinedReqChannel):
         super().__init__()
         self._sock = socket.socket(socket.AF_INET,
             socket.SOCK_STREAM, socket.IPPROTO_TCP)
+        self._sock.setblocking(0)
         try:
             self._sock.connect((host, port))
         except socket.error as e:
