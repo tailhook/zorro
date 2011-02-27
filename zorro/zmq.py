@@ -89,6 +89,14 @@ def sub_socket(callback):
 def pub_socket():
     return PubChannel()
 
+def pull_socket(callback):
+    sock = context().socket(zmq.PULL)
+    core.gethub().do_spawnservice(partial(sub_listener, sock, callback))
+    return sock
+
+def push_socket():
+    return PushChannel()
+
 def req_socket():
     return ReqChannel()
 
@@ -122,11 +130,12 @@ class ReqChannel(channel.MuxReqChannel):
             assert data[1] == b''
             self.produce(data[0], data[2:])
 
-class PubChannel(object):
+class OutputChannel(object):
+    zmq_kind = None
 
     def __init__(self):
         super().__init__()
-        self._sock = context().socket(zmq.PUB)
+        self._sock = context().socket(self.zmq_kind)
 
     def bind(self, value):
         self._sock.bind(value)
@@ -134,9 +143,17 @@ class PubChannel(object):
     def connect(self, value):
         self._sock.connect(value)
 
+class PubChannel(OutputChannel):
+    zmq_kind = zmq.PUB
+
     def publish(self, *args):
         send_data(self._sock, *args)
 
+class PushChannel(OutputChannel):
+    zmq_kind = zmq.PUSH
+
+    def push(self, *args):
+        send_data(self._sock, *args)
 
 def _get_fd(value):
     if isinstance(value, zmq.Socket):

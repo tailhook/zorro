@@ -1,7 +1,7 @@
 from distutils.core import setup
 
 setup(name='Zorro',
-      version='0.1.2',
+      version='0.1.3',
       description='Network communication library, with zeromq support',
       author='Paul Colomiets',
       author_email='pc@gafol.net',

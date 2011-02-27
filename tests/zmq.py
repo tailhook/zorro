@@ -80,6 +80,28 @@ class TestZeromq(Test):
         self.assertEquals(f.get(),
             b"(b'real', b'real', b'real', b'hello', b'world')")
 
+    def puller(self, *words):
+        if len(words) < 5:
+            self.push.push('real', *words)
+        else:
+            self.push2.push(repr(words))
+
+    @passive
+    def test_pushpull(self):
+        sock = self.z.zmq.pull_socket(self.puller)
+        sock.bind('tcp://127.0.0.1:9999')
+        self.z.sleep(0.1)
+        self.push = self.z.zmq.push_socket()
+        self.push.connect('tcp://127.0.0.1:9999')
+        self.push.push('hello', 'world')
+        f = self.z.Future()
+        sock = self.z.zmq.pull_socket(f.set)
+        sock.bind('tcp://127.0.0.1:9998')
+        self.push2 = self.z.zmq.push_socket()
+        self.push2.connect('tcp://127.0.0.1:9998')
+        self.assertEquals(f.get(),
+            b"(b'real', b'real', b'real', b'hello', b'world')")
+
 if __name__ == '__main__':
     import unittest
     unittest.main()
