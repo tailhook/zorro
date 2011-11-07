@@ -1,3 +1,5 @@
 *.pyc
 /tests.log
 /build
+/dist
+MANIFEST
