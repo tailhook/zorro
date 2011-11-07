@@ -18,7 +18,8 @@ Usage:
 
     from zorro import Hub
 
-    @Hub().run
+    hub = Hub()
+    @hub.run
     def main():
         # setup other coroutines here
         return
@@ -40,7 +41,8 @@ Basic zmq replier example. Each reply will get it's own microthread:
             # other requests will be ok (we use ZMQ_XREP actually)
             raise ValueError(preference)
 
-    @Hub().run
+    hub = Hub()
+    @hub.run
     def main():
         sock = zmq.rep_socket(replier)
         sock.connect('tcp://somewhere')
