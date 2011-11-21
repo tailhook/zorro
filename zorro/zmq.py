@@ -1,7 +1,12 @@
+import os
+import random
+import struct
+import errno
+import time
+from functools import partial
+
 import zmq
 from zmq import *
-import errno
-from functools import partial
 
 from . import core, channel
 
@@ -104,7 +109,19 @@ class ReqChannel(channel.MuxReqChannel):
 
     def __init__(self):
         super().__init__()
+        self.init_id()
         self._sock = context().socket(zmq.XREQ)
+
+    def init_id(self):
+        self.prefix = struct.pack('HHL',
+            os.getpid() % 65536, random.randrange(65536), int(time.time()))
+        self.counter = 0
+
+    def new_id(self):
+        self.counter += 1
+        if self.counter >= 4294967296:
+            self.init_id()
+        return self.prefix + struct.pack('L', self.counter)
 
     def bind(self, value):
         self._sock.bind(value)

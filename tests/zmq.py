@@ -1,5 +1,6 @@
 from .base import Test, interactive, passive
 import zmq
+import time
 
 class TestZeromq(Test):
 
@@ -41,6 +42,7 @@ class TestZeromq(Test):
     def make_request(self):
         sock = self.z.zmq.req_socket()
         sock.bind('tcp://127.0.0.1:9999')
+        time.sleep(0.15)
         self.assertEquals(sock.request([b"hello", b"world"]),
             [b"world", b"hello"])
         self.assertEquals(sock.request([b"abra", b"kadabra"]),

@@ -1,5 +1,3 @@
-import struct
-import time
 from . import Future, Condition, gethub
 from collections import deque
 
@@ -66,20 +64,9 @@ class MuxReqChannel(BaseChannel):
     def __init__(self):
         super().__init__()
         self.requests = {}
-        self.init_id()
-
-    def init_id(self):
-        import os, random, struct
-        self.prefix = struct.pack('HHL',
-            os.getpid() % 65536, random.randrange(65536), int(time.time()))
-        self.counter = 0
 
     def new_id(self):
-        self.counter += 1
-        if self.counter >= 4294967296:
-            self.init_id()
-            self.counter -= 4294967296
-        return self.prefix + struct.pack('L', self.counter)
+        raise NotImplementedError("Abstract method")
 
     def request(self, input):
         id = self.new_id()
@@ -90,6 +77,15 @@ class MuxReqChannel(BaseChannel):
         self._cond.notify()
         return val.get()
 
+    def push(self, input):
+        """For requests which do not need an answer"""
+        id = self.new_id()
+        assert not id in self.requests
+        self._pending.append((id, input))
+        self._cond.notify()
+
     def produce(self, id, data):
-        self.requests.pop(id).set(data)
+        fut = self.requests.pop(id, None)
+        if fut is not None:
+            fut.set(data)
 
