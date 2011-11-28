@@ -41,8 +41,7 @@ class TestZeromq(Test):
 
     def make_request(self):
         sock = self.z.zmq.req_socket()
-        sock.bind('tcp://127.0.0.1:9999')
-        time.sleep(0.15)
+        sock.connect('tcp://127.0.0.1:9999')
         self.assertEquals(sock.request([b"hello", b"world"]),
             [b"world", b"hello"])
         self.assertEquals(sock.request([b"abra", b"kadabra"]),
@@ -52,7 +51,7 @@ class TestZeromq(Test):
     def test_req(self):
         ctx = zmq.Context(1)
         sock = ctx.socket(zmq.REP)
-        sock.connect('tcp://127.0.0.1:9999')
+        sock.bind('tcp://127.0.0.1:9999')
         data = sock.recv_multipart()
         sock.send_multipart(list(reversed(data)))
         data = sock.recv_multipart()
