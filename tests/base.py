@@ -36,7 +36,7 @@ class Test(unittest.TestCase):
 
     def setUp(self):
         import zorro
-        from zorro import zmq, redis
+        from zorro import zmq
         self.z = zorro
         self.hub = self.z.Hub()
         self.thread = threading.Thread(target=self.hub.run)

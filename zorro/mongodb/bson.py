@@ -1,9 +1,15 @@
 import struct
+from binascii import hexlify
 from itertools import count
 
 _unpack_dict = {}
 _pack_dict = {}
 
+
+class ObjectID(bytes):
+
+    def __repr__(self):
+        return 'ObjectID.fromhex("{}")'.format(hexlify(self).decode('ascii'))
 
 def _unpack(char):
     def register(fun):
@@ -72,9 +78,20 @@ def unpack_array(buf, idx):
     return obj, idx+1
 
 
+@_unpack(0x07)
+def unpack_objectid(buf, idx):
+    return ObjectID(buf[idx:idx+12]), idx+12
+
+
+@_unpack(0x0A)
+def unpack_none(buf, idx):
+    return None, idx
+
+
 @_unpack(0x10)
 def unpack_int32(buf, idx):
     return struct.unpack_from('<i', buf, idx)[0], idx + 4
+
 
 @_unpack(0x12)
 def unpack_int64(buf, idx):
@@ -93,6 +110,12 @@ def loads(s):
     return obj
 
 
+def iter_load_from(buf, offset=0):
+    while offset < len(buf):
+        obj, offset = unpack_document(buf, offset)
+        yield obj
+
+
 @_pack(0x01, float)
 def pack_float(value, buf):
     buf.extend(struct.pack('<d', value))
@@ -109,7 +132,7 @@ def pack_string(value, buf):
 @_pack(0x03, dict)
 def pack_document(value, buf):
     pos = len(buf)
-    buf.extend('\x00\x00\x00\x00')
+    buf += b'\x00\x00\x00\x00'
     _pack_doc(value.items(), buf)
     buf.append(0)
     struct.pack_into('<i', buf, pos, len(buf) - pos)
@@ -118,11 +141,22 @@ def pack_document(value, buf):
 @_pack(0x04, list)
 def pack_array(value, buf):
     pos = len(buf)
-    buf.extend(b'\x00\x00\x00\x00')
+    buf += b'\x00\x00\x00\x00'
     _pack_doc(((str(i), v)
                for i, v in enumerate(value)), buf)
     buf.append(0)
     struct.pack_into('<i', buf, pos, len(buf) - pos)
+
+
+@_pack(0x07, ObjectID)
+def pack_objectid(value, buf):
+    assert len(value) == 12, "ObjectID length is not 12"
+    buf += value
+
+
+@_pack(0x0A, type(None))
+def pack_none(value, buf):
+    """Nothing needed to pack None, type byte is in another place"""
 
 
 @_pack(0x10, int)
@@ -141,7 +175,7 @@ def _pack_doc(pairs, buf):
                     spec = _pack_dict[typ]
                     break
             else:
-                raise ValueError("Can't BSONize "+type(v))
+                raise ValueError("Can't BSONize {}".format(type(v)))
         ch, fun = spec
         buf.append(ch)
         buf.extend(k.encode('utf-8'))
@@ -155,3 +189,19 @@ def dumps(obj):
     buf.append(0)
     struct.pack_into('<i', buf, 0, len(buf))
     return bytes(buf)
+
+
+def dump_extend(buf, obj):
+    pos = len(buf)
+    buf += b'\x00\x00\x00\x00'
+    _pack_doc(obj.items(), buf)
+    buf.append(0)
+    struct.pack_into('<i', buf, pos, len(buf)-pos)
+
+
+def dump_extend_iter(buf, iterable):
+    pos = len(buf)
+    buf += b'\x00\x00\x00\x00'
+    _pack_doc(iterable, buf)
+    buf.append(0)
+    struct.pack_into('<i', buf, pos, len(buf) - pos)
