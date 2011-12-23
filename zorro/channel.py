@@ -31,6 +31,9 @@ class PipelinedReqChannel(BaseChannel):
         self._producing = deque()
         self._cur_producing = []
 
+    def has_unanswered_requests(self):
+        return self._pending or self._producing or self._cur_producing
+
     def produce(self, value):
         val = self._cur_producing.append(value)
         num = self._producing[0][0]

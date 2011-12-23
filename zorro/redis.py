@@ -42,6 +42,7 @@ class RedisChannel(channel.PipelinedReqChannel):
 
     def __init__(self, host, port, db):
         super().__init__()
+        self._alive = True
         self._sock = socket.socket(socket.AF_INET,
             socket.SOCK_STREAM, socket.IPPROTO_TCP)
         self._sock.setblocking(0)
@@ -56,6 +57,9 @@ class RedisChannel(channel.PipelinedReqChannel):
         assert self.request('*2\r\n$6\r\nSELECT\r\n${0}\r\n{1}\r\n'
             .format(len(db), db).encode('ascii')) == 'OK'
 
+    def __bool__(self):
+        return self._alive
+
     def sender(self):
         buf = bytearray()
 
@@ -65,6 +69,8 @@ class RedisChannel(channel.PipelinedReqChannel):
         while True:
             if not buf:
                 self.wait_requests()
+            if not self._alive:
+                return
             wait_write(self._sock)
             for chunk in self.get_pending_requests():
                 add_chunk(chunk)
@@ -96,7 +102,13 @@ class RedisChannel(channel.PipelinedReqChannel):
                         pos[0] = 0
                     bytes = sock.recv(self.BUFSIZE)
                     if not bytes:
-                        raise EOFError()
+                        self._alive = False
+                        self._pending.append(None)  # to wake up write thread
+                        self._cond.notify()
+                        if self.has_unanswered_requests():
+                            raise EOFError()
+                        else:
+                            return
                     add_chunk(bytes)
                 except socket.error as e:
                     if e.errno in (errno.EAGAIN, errno.EINTR):
