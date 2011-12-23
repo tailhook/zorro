@@ -182,6 +182,7 @@ class Redis(object):
     def pipeline(self, commands):
         if not self._channel:
             self._channel = RedisChannel(self.host, self.port, self.db)
+        buf = bytearray()
         for cmd in commands:
             encode_command(buf, cmd)
         return self._channel.request(buf, len(commands))
@@ -189,8 +190,8 @@ class Redis(object):
     def bulk(self, commands):
         if not self._channel:
             self._channel = RedisChannel(self.host, self.port, self.db)
-        assert commands[0][0] == 'MULTI' and commands[-1][0] in ('EXEC', 'DISCARD'),\
-            commands
+        if commands[0][0] != 'MULTI' or commands[-1][0] != 'EXEC':
+            raise ValueError("Bulk must start with MULTI and end with EXEC")
         buf = bytearray()
         for cmd in commands:
             encode_command(buf, cmd)
