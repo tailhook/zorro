@@ -12,7 +12,7 @@ from . import core, channel
 
 DEFAULT_IO_THREADS = 1
 
-def send_data(sock, *data, address=None):
+def send_data(sock, data, address=None):
     if address is None:
         _rep = []
     else:
@@ -41,14 +41,14 @@ def rep_responder(sock, address, callback, data):
     hub = core.gethub()
     reply = callback(*data)
     if isinstance(reply, bytes):
-        send_data(sock, reply, address=address)
+        send_data(sock, (reply,), address=address)
     elif isinstance(reply, str):
-        send_data(sock, reply.encode('utf-8'), address=address)
+        send_data(sock, (reply.encode('utf-8'),), address=address)
     elif reply is None:
         raise RuntimeError("Replier callback must return either string,"
             " bytes or sequence of strings or bytes")
     else:
-        send_data(sock, *reply, address=address)
+        send_data(sock, reply, address=address)
 
 def rep_listener(sock, callback):
     hub = core.gethub()
@@ -164,13 +164,13 @@ class PubChannel(OutputChannel):
     zmq_kind = zmq.PUB
 
     def publish(self, *args):
-        send_data(self._sock, *args)
+        send_data(self._sock, args)
 
 class PushChannel(OutputChannel):
     zmq_kind = zmq.PUSH
 
     def push(self, *args):
-        send_data(self._sock, *args)
+        send_data(self._sock, args)
 
 def _get_fd(value):
     if isinstance(value, zmq.Socket):

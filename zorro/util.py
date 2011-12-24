@@ -78,3 +78,15 @@ def socket_pair():
     b.setblocking(0)
     return a, b
 
+
+class cached_property(object):
+
+    def __init__(self, fun):
+        self.function = fun
+        self.name = fun.__name__
+
+    def __get__(self, obj, cls):
+        if obj is None:
+            return self
+        res = obj.__dict__[self.name] = self.function(obj)
+        return res
