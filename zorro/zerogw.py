@@ -40,6 +40,70 @@ def cid(val):
     return val
 
 
+class JSONWebsockInput(object):
+
+    def __init__(self, output, prefix=''):
+        self.prefix = prefix
+        self.output = output
+
+    def __call__(self, cid, kind, *tail):
+        meth = getattr(self, 'handle_' + kind.decode('ascii'), None)
+        if meth:
+            meth(cid, *tail)
+        else:
+            log.info("Unhandled message %r", kind)
+
+    def handle_message(self, cid, body):
+        parts = json.loads(body.decode('utf-8'))
+        cmd = parts.pop(0)
+        req_id = None
+        if cmd.endswith('+'):
+            cmd = cmd[:-1]
+            req_id = parts.pop(0)
+
+        if not cmd.startswith(self.prefix):
+            log.info("Wrong command received %r where prefix is %r",
+                     cmd, self.prefix)
+            self.output.send(cid, ['_request_error', req_id, 'wrong_command'])
+            return
+
+        cmd = cmd[len(self.prefix):]
+        target = getattr(self, cmd, None)
+        if target is None:
+            log.info("Wrong command %r", cmd)
+            return
+        try:
+            result = self._call_convention(target, cid, *parts)
+        except Exception as e:
+            log.info('Exception when processing command %r', cmd)
+            if req_id:
+                if hasattr(e, 'as_json'):
+                    self.output.send(cid, ['_request_error',
+                        req_id, e.as_json()])
+                else:
+                    self.output.send(cid, ['_request_error',
+                        req_id, 'internal_error'])
+            return
+        if req_id:
+            try:
+                val = ['_reply', req_id,  result]
+            except Exception as e:
+                log.info('Exception when serializing reply for %r', cmd)
+                self.output.send(cid, ['_request_error',
+                    req_id, 'cant_serialize'])
+            else:
+                self.output.send(cid, val)
+
+    def _call_convention(self, target, cid, *args):
+        convention = getattr(target, '__zorro_convention__', None)
+        if convention == 'simple':
+            return target(*args)
+        elif convention is None:
+            return
+        else:
+            raise UnknownConvention(
+                "Unknown convention {!r}".format(convention))
+
 class JSONWebsockOutput(object):
 
     def __init__(self, channel):
