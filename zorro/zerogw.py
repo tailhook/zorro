@@ -141,6 +141,8 @@ class JSONWebsockInput(object):
         convention = getattr(target, '__zorro_convention__', None)
         if convention == 'simple':
             return target(*args)
+        elif convention == 'simple+cid':
+            return target(cid, *args)
         elif convention is None:
             return
         else:
@@ -297,6 +299,11 @@ def public(fun):
     return fun
 
 
+def public_with_connection_id(fun):
+    fun.__zorro_convention__ = 'simple+cid'
+    return fun
+
+
 class TreeService(HTTPService):
 
     def __init__(self, *input_fields):
@@ -343,6 +350,7 @@ class ParamService(HTTPService):
         methname = request.parsed_uri.params or 'default'
         target = getattr(self, methname, None)
         return self._call_convention(target, request)
+
 
 class MethodService(HTTPService):
 
