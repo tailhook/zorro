@@ -118,7 +118,7 @@ class JSONWebsockInput(object):
         try:
             result = self._call_convention(target, cid, *parts)
         except Exception as e:
-            log.info('Exception when processing command %r', cmd)
+            log.exception('Exception when processing command %r', cmd)
             if req_id:
                 if hasattr(e, 'as_json'):
                     self.output.send(cid, ['_request_error',
@@ -131,7 +131,7 @@ class JSONWebsockInput(object):
             try:
                 val = ['_reply', req_id,  result]
             except Exception as e:
-                log.info('Exception when serializing reply for %r', cmd)
+                log.exception('Exception when serializing reply for %r', cmd)
                 self.output.send(cid, ['_request_error',
                     req_id, 'cant_serialize'])
             else:
