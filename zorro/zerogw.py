@@ -1,5 +1,6 @@
 import json
 import abc
+import logging
 from urllib.parse import urlparse, parse_qsl
 from collections import namedtuple
 
@@ -8,9 +9,9 @@ import zmq
 from . import redis
 from .zmq import send_data
 from .util import cached_property
+from .di import has_dependencies, dependency
 
 
-import logging
 log = logging.getLogger(__name__)
 
 
@@ -40,11 +41,53 @@ def cid(val):
     return val
 
 
+class JSONWebsockOutput(object):
+
+    def __init__(self, channel):
+        self._channel = channel
+        # we use private interface for performance
+        self._sock = channel._sock
+
+    def subscribe(self, conn, topic):
+        self._do_send((b'subscribe', cid(conn), topic))
+
+    def unsubscribe(self, conn, topic):
+        self._do_send((b'unsubscribe', cid(conn), topic))
+
+    def drop(self, topic):
+        self._do_send((b'drop', topic))
+
+    def send(self, conn, data):
+        self._do_send((b'send', cid(conn), blob(data)))
+
+    def publish(self, topic, data):
+        self._do_send((b'publish', topic, blob(data)))
+
+    def set_cookie(self, conn, cookie):
+        self._do_send((b'set_cookie', cid(conn), cookie))
+
+    def add_output(self, conn, prefix, name):
+        self._do_send((b'add_output', cid(conn), prefix, name))
+
+    def del_output(self, conn, prefix, name):
+        self._do_send((b'del_output', cid(conn), prefix, name))
+
+    def disconnect(self, conn):
+        self._do_send((b'disconnect', cid(conn)))
+
+    def _do_send(self, data):
+        log.debug("Sending to zerogw: %r", data)
+        # we use private interface for performance
+        send_data(self._sock, data)
+
+
+@has_dependencies
 class JSONWebsockInput(object):
 
-    def __init__(self, output, prefix=''):
+    output = dependency(JSONWebsockOutput, 'output')
+
+    def __init__(self, prefix=''):
         self.prefix = prefix
-        self.output = output
 
     def __call__(self, cid, kind, *tail):
         meth = getattr(self, 'handle_' + kind.decode('ascii'), None)
@@ -103,45 +146,6 @@ class JSONWebsockInput(object):
         else:
             raise UnknownConvention(
                 "Unknown convention {!r}".format(convention))
-
-class JSONWebsockOutput(object):
-
-    def __init__(self, channel):
-        self._channel = channel
-        # we use private interface for performance
-        self._sock = channel._sock
-
-    def subscribe(self, conn, topic):
-        self._do_send((b'subscribe', cid(conn), topic))
-
-    def unsubscribe(self, conn, topic):
-        self._do_send((b'unsubscribe', cid(conn), topic))
-
-    def drop(self, topic):
-        self._do_send((b'drop', topic))
-
-    def send(self, conn, data):
-        self._do_send((b'send', cid(conn), blob(data)))
-
-    def publish(self, topic, data):
-        self._do_send((b'publish', topic, blob(data)))
-
-    def set_cookie(self, conn, cookie):
-        self._do_send((b'set_cookie', cid(conn), cookie))
-
-    def add_output(self, conn, prefix, name):
-        self._do_send((b'add_output', cid(conn), prefix, name))
-
-    def del_output(self, conn, prefix, name):
-        self._do_send((b'del_output', cid(conn), prefix, name))
-
-    def disconnect(self, conn):
-        self._do_send((b'disconnect', cid(conn)))
-
-    def _do_send(self, data):
-        log.debug("Sending to zerogw: %r", data)
-        # we use private interface for performance
-        send_data(self._sock, data)
 
 
 class RequestMixin(object):
