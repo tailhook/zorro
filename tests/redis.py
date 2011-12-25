@@ -6,9 +6,7 @@ class Redis(Test):
     def setUp(self):
         super().setUp()
         import zorro.redis
-        self.r = self.z.redis.plug(self.hub, db=13)
-        #if self.r.keys('*'):
-        #    raise Exception('Redis database #13 is not empty!')
+        self.r = zorro.redis.Redis(db=13)
 
 class SingleThread(Redis):
 

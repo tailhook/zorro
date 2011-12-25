@@ -7,8 +7,8 @@ class Mongodb(Test):
     def setUp(self):
         super().setUp()
         import zorro.mongodb
-        self.m = self.z.mongodb.plug(self.hub, db='test')
-        self.c = self.m['test_collection']
+        self.m = zorro.mongodb.Connection()
+        self.c = self.m['test']['test_collection']
 
     def query_data(self, *args, **kw):
         lst = list(self.c.query(*args, **kw))

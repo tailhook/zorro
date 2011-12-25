@@ -1,2 +1,1 @@
-
-from . proto import plug, mongodb
+from .proto import Connection

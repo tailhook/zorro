@@ -3,18 +3,6 @@ from . import channel
 import socket
 import errno
 
-def plug(hub, *a, name='default', **kw):
-    redis = Redis(*a, **kw)
-    setattr(hub, 'redis_' + name, redis)
-    hub.log_plugged(redis, name='redis_'+name)
-    return redis
-
-def redis(name='default'):
-    redis = getattr(gethub(), 'redis_' + name, None)
-    if redis is None:
-        return plug(gethub(), name=name)
-    return redis
-
 convert = {
     str: lambda a: a.encode('utf-8'),
     bytes: lambda a: a,

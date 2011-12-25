@@ -15,19 +15,6 @@ OP_GET_MORE	= 2005
 OP_DELETE = 2006
 OP_KILL_CURSORS	= 2007
 
-def plug(hub, *a, name='default', db, **kw):
-    mongodb = Connection(*a, **kw)
-    setattr(hub, 'mongodb_' + name, mongodb[db])
-    hub.log_plugged(mongodb[db], name='mongodb_'+name)
-    return mongodb[db]
-
-
-def mongodb(name='default', db='test'):
-    mongodb = getattr(gethub(), 'mongodb_' + name, None)
-    if mongodb is None:
-        return plug(gethub(), name=name)
-    return mongodb
-
 
 class MongodbError(Exception):
     pass
