@@ -1,4 +1,18 @@
- * implement other zmq socket types
+Mongodb:
+ * implement full bson spec
+ * implement admin commands
+ * implement index creation
+ * implement reconnection to mongodb
+
+Dependency Injection:
+ * establish good rules of propagating dependency changes
+
+Zerogw:
+ * better request object: cookie handling, body parsing ...
+
+Core:
+ * limit number of simultaneous tasks for pull, sub and rep sockets
+ * think about making timeouts to not leave broken tasks forever in memory
  * implement hub with debugging log
  * add `multithreaded` hub option
  * think about waiting multiple events in single greenlet
