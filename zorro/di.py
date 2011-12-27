@@ -60,7 +60,7 @@ class dependency:
     def __get__(self, inst, owner):
         if inst is None:
             return self
-        raise RuntimError("Dependency {!r} is not configured".format(self))
+        raise RuntimeError("Dependency {!r} is not configured".format(self))
 
     def __repr__(self):
         return "<dependency {!r}:{!r}>".format(self.type, self.name)
