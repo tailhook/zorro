@@ -4,6 +4,10 @@ Mongodb:
  * implement index creation
  * implement reconnection to mongodb
 
+Redis:
+ * implement reconnection
+ * implement memcached-style sharding
+
 Dependency Injection:
  * establish good rules of propagating dependency changes
 
@@ -11,6 +15,7 @@ Zerogw:
  * better request object: cookie handling, body parsing ...
 
 Core:
+ * implement some helpers for reconnecton support for connectionful channels
  * limit number of simultaneous tasks for pull, sub and rep sockets
  * think about making timeouts to not leave broken tasks forever in memory
  * implement hub with debugging log
