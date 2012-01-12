@@ -5,10 +5,13 @@ This is mostly networking library. It implements main loop based on greenlets.
 Mostly suitable for servers of some kind.
 
 API's implemented so far:
+
  * Redis
  * Zeromq
+ * Mongo
 
 Primitives implemented so far:
+
  * Lock (actually, mutex, locked using `with` statement)
  * Condition (condition variable, use `wait()` and `notify()`)
  * Future (either give it function to constructor or use `set()` for setting and
