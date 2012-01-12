@@ -28,14 +28,20 @@ class RedisError(Exception):
 class RedisChannel(channel.PipelinedReqChannel):
     BUFSIZE = 16384
 
-    def __init__(self, host, port, db):
+    def __init__(self, host, port, unixsock, db):
         super().__init__()
         self._alive = True
-        self._sock = socket.socket(socket.AF_INET,
-            socket.SOCK_STREAM, socket.IPPROTO_TCP)
+        if unixsock:
+            self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        else:
+            self._sock = socket.socket(socket.AF_INET,
+                socket.SOCK_STREAM, socket.IPPROTO_TCP)
         self._sock.setblocking(0)
         try:
-            self._sock.connect((host, port))
+            if unixsock:
+                self._sock.connect(unixsock)
+            else:
+                self._sock.connect((host, port))
         except socket.error as e:
             if e.errno == errno.EINPROGRESS:
                 gethub().do_write(self._sock)
@@ -162,34 +168,37 @@ class RedisChannel(channel.PipelinedReqChannel):
 
 
 class Redis(object):
-    def __init__(self, host='localhost', port=6379, db=0):
+    def __init__(self, host='localhost', port=6379, unixsock=None, db=0):
+        self.unixsock = unixsock
         self.host = host
         self.port = port
         self.db = db
         self._channel = None
         self._channel_lock = Lock()
 
-    # low-level stuff
-    def execute(self, *args):
+    def check_connection(self):
         if not self._channel:
             with self._channel_lock:
                 if not self._channel:
-                    self._channel = RedisChannel(self.host, self.port, self.db)
+                    self._channel = RedisChannel(self.host, self.port,
+                        db=self.db, unixsock=self.unixsock)
+
+    # low-level stuff
+    def execute(self, *args):
+        self.check_connection()
         buf = bytearray()
         encode_command(buf, args)
         return self._channel.request(buf)
 
     def pipeline(self, commands):
-        if not self._channel:
-            self._channel = RedisChannel(self.host, self.port, self.db)
+        self.check_connection()
         buf = bytearray()
         for cmd in commands:
             encode_command(buf, cmd)
         return self._channel.request(buf, len(commands))
 
     def bulk(self, commands):
-        if not self._channel:
-            self._channel = RedisChannel(self.host, self.port, self.db)
+        self.check_connection()
         if commands[0][0] != 'MULTI' or commands[-1][0] != 'EXEC':
             raise ValueError("Bulk must start with MULTI and end with EXEC")
         buf = bytearray()
