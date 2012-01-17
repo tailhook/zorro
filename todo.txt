@@ -10,11 +10,19 @@ Redis:
 
 Dependency Injection:
  * establish good rules of propagating dependency changes
+ * implement lazy dependency creation
+ * implement `__contains__` check
 
 Zerogw:
- * better request object: cookie handling, body parsing ...
+ * better request object: cookie handling
+
+Protocols:
+ * HTTP client
+ * collectd (unixsocket and/or UDP and/or zeromq)
+ * Implement some RPC support on top of zeromq
 
 Core:
+ * implement pluggable logging
  * implement some helpers for reconnecton support for connectionful channels
  * limit number of simultaneous tasks for pull, sub and rep sockets
  * think about making timeouts to not leave broken tasks forever in memory
