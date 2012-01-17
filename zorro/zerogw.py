@@ -338,7 +338,7 @@ class TreeService(HTTPService):
             return target(*cpath[(idx or 10000)+1:].split('/'),
                 **dict(parse_qsl(request.parsed_uri.query)))
         else:
-            return self._call_convention(meth, request)
+            return self._call_convention(target, request)
 
 
 class ParamService(HTTPService):
