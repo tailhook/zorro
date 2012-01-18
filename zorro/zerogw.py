@@ -12,6 +12,7 @@ from .util import cached_property
 from .di import has_dependencies, dependency
 
 
+FORM_CTYPE = 'application/x-www-form-urlencoded'
 log = logging.getLogger(__name__)
 
 
@@ -183,7 +184,7 @@ class RequestMixin(object):
         if hasattr(self, 'uri'):
             arguments.update(parse_qsl(self.parsed_uri.query))
         body = getattr(self, 'body', None)
-        if body:
+        if body and getattr(self, 'content_type', None) == FORM_CTYPE:
             arguments.update(parse_qsl(self.body.decode('ascii')))
         return arguments
 
