@@ -103,6 +103,9 @@ class DependencyInjector(object):
                 if not isinstance(val, dep.type):
                     raise RuntimeError("Wrong provider for {!r}".format(val))
                 setattr(inst, attr, val)
+        meth = getattr(inst, '__zorro_di_done__', None)
+        if meth is not None:
+            meth()
         return inst
 
     def inject_subset(self, inst, *names, **renames):
@@ -126,6 +129,9 @@ class DependencyInjector(object):
                 if not isinstance(val, dep.type):
                     raise RuntimeError("Wrong provider for {!r}".format(val))
                 setattr(inst, attr, val)
+        meth = getattr(inst, '__zorro_di_done__', None)
+        if meth is not None:
+            meth()
         return inst
 
     def inject_restricted(self, inst):
@@ -148,6 +154,9 @@ class DependencyInjector(object):
                 if not isinstance(val, dep.type):
                     raise RuntimeError("Wrong provider for {!r}".format(val))
                 setattr(inst, attr, val)
+        meth = getattr(inst, '__zorro_di_done__', None)
+        if meth is not None:
+            meth()
         return inst
 
     def __setitem__(self, name, value):
