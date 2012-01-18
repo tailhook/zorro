@@ -150,6 +150,24 @@ class JSONWebsockInput(object):
                 "Unknown convention {!r}".format(convention))
 
 
+class LegacyMultiDict(object):
+    """Utilitary class which wrap dict to make it suitable for old utilities
+    like wtforms"""
+
+    def __init__(self, dic):
+        self._dic = dic
+
+    def getlist(self, k):
+        return [self._dic[k]]
+
+    def __contains__(self, k):
+        return k in self._dic
+
+    def __iter__(self):
+        for k in self._dic:
+            yield k
+
+
 class RequestMixin(object):
     # TODO(tailhook) implement cookie utility
     # TODO(tailhook) implement get arguments parsing utility
@@ -158,6 +176,20 @@ class RequestMixin(object):
     @cached_property
     def parsed_uri(self):
         return urlparse(self.uri.decode('ascii'))
+
+    @cached_property
+    def form_arguments(self):
+        arguments = {}
+        if hasattr(self, 'uri'):
+            arguments.update(parse_qsl(self.parsed_uri.query))
+        body = getattr(self, 'body', None)
+        if body:
+            arguments.update(parse_qsl(self.body.query))
+        return arguments
+
+    @cached_property
+    def legacy_arguments(self):
+        return LegacyMultiDict(self.form_arguments)
 
 
 class InternalRedirect(Exception, metaclass=abc.ABCMeta):
@@ -276,12 +308,18 @@ class HTTPService(object):
         if hasattr(target, 'dispatch'):
             return target.dispatch(request, cpath[next_idx])
         convention = getattr(target, '__zorro_convention__', None)
-        if convention == 'splitpath':
+        if convention == 'request':
+            return target(request)
+        elif convention == 'splitpath':
             return target(*cpath[(idx or 10000)+1:].split('/'),
                 **dict(parse_qsl(request.parsed_uri.query)))
         elif convention == 'simple':
             return target(request.parsed_uri.path,
                 **dict(parse_qsl(request.parsed_uri.query)))
+        elif convention == 'form':
+            args = request.legacy_arguments
+            form = target.__zorro_form__(args)
+            return target(form)
         elif convention is None:
             raise Forbidden()
         else:
@@ -302,6 +340,19 @@ def public(fun):
 def public_with_connection_id(fun):
     fun.__zorro_convention__ = 'simple+cid'
     return fun
+
+
+def public_with_request(fun):
+    fun.__zorro_convention__ = 'request'
+    return fun
+
+
+def public_with_form(FormClass):
+    def decorator(fun):
+        fun.__zorro_convention__ = 'form'
+        fun.__zorro_form__ = FormClass
+        return fun
+    return decorator
 
 
 class TreeService(HTTPService):
@@ -328,7 +379,7 @@ class TreeService(HTTPService):
             target = self.children[part]
         elif not part:
             target = getattr(self, 'index', None)
-        elif not part.startswith('_'):
+        elif part.startswith('_'):
             raise Forbidden()
         else:
             target = getattr(self, part, None)
