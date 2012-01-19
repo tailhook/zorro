@@ -184,7 +184,7 @@ class RequestMixin(object):
             arguments.update(parse_qsl(self.parsed_uri.query))
         body = getattr(self, 'body', None)
         if body:
-            arguments.update(parse_qsl(self.body.query))
+            arguments.update(parse_qsl(self.body.decode('ascii')))
         return arguments
 
     @cached_property
@@ -317,9 +317,14 @@ class HTTPService(object):
             return target(request.parsed_uri.path,
                 **dict(parse_qsl(request.parsed_uri.query)))
         elif convention == 'form':
-            args = request.legacy_arguments
-            form = target.__zorro_form__(args)
-            return target(form)
+            if request.form_arguments:
+                args = request.legacy_arguments
+                form = target.__zorro_form__(args)
+                submited = True
+            else:
+                form = target.__zorro_form__()
+                submited = False
+            return target(form, submited)
         elif convention is None:
             raise Forbidden()
         else:
