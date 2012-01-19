@@ -307,7 +307,7 @@ class HTTPService(object):
         if target is None:
             raise NotFound()
         if hasattr(target, 'dispatch'):
-            return target.dispatch(request, cpath[next_idx])
+            return target.dispatch(request)
         convention = getattr(target, '__zorro_convention__', None)
         if convention == 'request':
             return target(request)
@@ -390,6 +390,8 @@ class TreeService(HTTPService):
         else:
             target = getattr(self, part, None)
 
+        if isinstance(target, TreeService):
+            return target.dispatch(request, cpath[:next_idx])
         convention = getattr(target, '__zorro_convention__', None)
         if convention == 'splitpath':
             return target(*cpath[(idx or 10000)+1:].split('/'),
