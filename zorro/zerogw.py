@@ -1,6 +1,7 @@
 import json
 import abc
 import logging
+from http.cookies import SimpleCookie
 from urllib.parse import urlparse, parse_qsl
 from collections import namedtuple
 
@@ -191,6 +192,11 @@ class RequestMixin(object):
     @cached_property
     def legacy_arguments(self):
         return LegacyMultiDict(self.form_arguments)
+
+    @cached_property
+    def cookies(self):
+        cobj = SimpleCookie(self.cookie.decode('ascii', 'ignore'))
+        return dict((k, cobj[k].value) for k in cobj)
 
 
 class InternalRedirect(Exception, metaclass=abc.ABCMeta):
