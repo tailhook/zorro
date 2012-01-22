@@ -347,8 +347,9 @@ class Future(object):
         self._value = value
         lst = self._listeners
         del self._listeners
+        hub = gethub()
         for one in lst:
-            gethub().queue_task(one)
+            hub.queue_task(one)
 
     def throw(self, exception):
         self._value = FUTURE_EXCEPTION
