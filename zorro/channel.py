@@ -1,13 +1,48 @@
 from . import Future, Condition, gethub
 from collections import deque
 
+
+class PipeError(Exception):
+    pass
+
+class ShutdownException(Exception):
+    pass
+
+
 class BaseChannel(object):
     def __init__(self):
+        self._alive = True
         self._pending = deque()
         self._cond = Condition()
         hub = gethub()
-        hub.do_spawnhelper(self.sender)
-        hub.do_spawnhelper(self.receiver)
+        hub.do_spawnhelper(self._sender_wrapper)
+        hub.do_spawnhelper(self._receiver_wrapper)
+
+    def __bool__(self):
+        return self._alive
+
+    def _sender_wrapper(self):
+        try:
+            self.sender()
+        except (EOFError, ShutdownException):
+            pass
+        finally:
+            if self._alive:
+                self._alive = False
+                self._stop_producing()
+
+    def _receiver_wrapper(self):
+        try:
+            self.receiver()
+        except (EOFError, ShutdownException):
+            pass
+        finally:
+            if self._alive:
+                self._alive = False
+                self._stop_producing()
+
+    def _stop_producing(self):
+        pass
 
     def peek_request(self):
         self.wait_requests()
@@ -18,6 +53,8 @@ class BaseChannel(object):
 
     def wait_requests(self):
         while not self._pending:
+            if not self._alive:
+                raise ShutdownException()
             self._cond.wait()
 
     def get_pending_requests(self):
@@ -31,8 +68,11 @@ class PipelinedReqChannel(BaseChannel):
         self._producing = deque()
         self._cur_producing = []
 
-    def has_unanswered_requests(self):
-        return self._pending or self._producing or self._cur_producing
+    def _stop_producing(self):
+        prod = self._producing
+        del self._producing
+        for num, fut in prod:
+            fut.throw(PipeError())
 
     def produce(self, value):
         val = self._cur_producing.append(value)
@@ -47,21 +87,14 @@ class PipelinedReqChannel(BaseChannel):
         del self._cur_producing[:]
 
     def request(self, input, num_output=None):
+        if not self._alive:
+            raise PipeError()
         val = Future()
         self._pending.append(input)
         self._producing.append((num_output, val))
         self._cond.notify()
-        return val.get()
+        return val
 
-    def wait_requests(self):
-        while True:
-            if self._pending:
-                return
-            self._cond.wait()
-
-    def get_pending_requests(self):
-        while self._pending:
-            yield self._pending.popleft()
 
 class MuxReqChannel(BaseChannel):
     def __init__(self):
@@ -71,14 +104,22 @@ class MuxReqChannel(BaseChannel):
     def new_id(self):
         raise NotImplementedError("Abstract method")
 
+    def _stop_producing(self):
+        reqs = self.requests
+        del self.requests
+        for fut in reqs.values():
+            fut.throw(PipeError())
+
     def request(self, input):
+        if not self._alive:
+            raise PipeError()
         id = self.new_id()
         assert not id in self.requests
         val = Future()
         self.requests[id] = val
         self._pending.append((id, input))
         self._cond.notify()
-        return val.get()
+        return val
 
     def push(self, input):
         """For requests which do not need an answer"""

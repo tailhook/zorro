@@ -1,1 +1,1 @@
-from .proto import Connection
+from .proto import Connection, Database, Collection

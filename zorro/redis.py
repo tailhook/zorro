@@ -30,7 +30,6 @@ class RedisChannel(channel.PipelinedReqChannel):
 
     def __init__(self, host, port, unixsock, db):
         super().__init__()
-        self._alive = True
         if unixsock:
             self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         else:
@@ -49,10 +48,7 @@ class RedisChannel(channel.PipelinedReqChannel):
                 raise
         db = str(db)
         assert self.request('*2\r\n$6\r\nSELECT\r\n${0}\r\n{1}\r\n'
-            .format(len(db), db).encode('ascii')) == 'OK'
-
-    def __bool__(self):
-        return self._alive
+            .format(len(db), db).encode('ascii')).get() == 'OK'
 
     def sender(self):
         buf = bytearray()
@@ -96,13 +92,7 @@ class RedisChannel(channel.PipelinedReqChannel):
                         pos[0] = 0
                     bytes = sock.recv(self.BUFSIZE)
                     if not bytes:
-                        self._alive = False
-                        self._pending.append(None)  # to wake up write thread
-                        self._cond.notify()
-                        if self.has_unanswered_requests():
-                            raise EOFError()
-                        else:
-                            return
+                        raise EOFError()
                     add_chunk(bytes)
                 except socket.error as e:
                     if e.errno in (errno.EAGAIN, errno.EINTR):
@@ -188,6 +178,12 @@ class Redis(object):
         self.check_connection()
         buf = bytearray()
         encode_command(buf, args)
+        return self._channel.request(buf).get()
+
+    def future(self, *args):
+        self.check_connection()
+        buf = bytearray()
+        encode_command(buf, args)
         return self._channel.request(buf)
 
     def pipeline(self, commands):
@@ -195,7 +191,7 @@ class Redis(object):
         buf = bytearray()
         for cmd in commands:
             encode_command(buf, cmd)
-        return self._channel.request(buf, len(commands))
+        return self._channel.request(buf, len(commands)).get()
 
     def bulk(self, commands):
         self.check_connection()
@@ -204,7 +200,7 @@ class Redis(object):
         buf = bytearray()
         for cmd in commands:
             encode_command(buf, cmd)
-        val = self._channel.request(buf, len(commands))
+        val = self._channel.request(buf, len(commands)).get()
         if val[0] != 'OK':
             raise RuntimeError(val, commands)
         for i in val[1:-1]:

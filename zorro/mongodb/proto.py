@@ -195,7 +195,7 @@ class Collection(object):
                 bson.dump_extend_iter(req, ((k, 1) for k in fields))
             else:
                 bson.dump_extend(req, fields)
-        res = self._conn.channel().request(req)
+        res = self._conn.channel().request(req).get()
         op_code, flags, _, start, num = struct.unpack_from('<12xiiqii', res, 0)
         if op_code != OP_REPLY:
             raise MongodbError("Wrong kind of reply returned")

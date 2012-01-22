@@ -40,7 +40,7 @@ class Core(Test):
         f = self.z.Future()
         self.hub.do_spawn(
             lambda: (f.set('hello'), cond.notify()))
-        self.assertFalse(hasattr(f, '_value'))
+        self.assertEquals(f._value , self.z.core.FUTURE_PENDING)
         cond.wait()
         self.assertEquals(f._value, 'hello')
 

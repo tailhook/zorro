@@ -9,7 +9,7 @@ from collections import deque, defaultdict
 from functools import partial
 from operator import methodcaller
 
-from .util import priorityqueue, orderedset, socket_pair
+from .util import priorityqueue, orderedset, socket_pair, marker_object
 
 __all__ = [
     'Zorrolet',
@@ -19,6 +19,9 @@ __all__ = [
     'Condition',
     'Lock',
     ]
+
+FUTURE_EXCEPTION = marker_object('FUTURE_EXCEPTION')
+FUTURE_PENDING = marker_object('FUTURE_PENDING')
 
 class Zorrolet(greenlet.greenlet):
     __slots__ = ('hub', 'cleanup')
@@ -308,24 +311,38 @@ class Condition(object):
 class Future(object):
     def __init__(self, fun=None):
         self._listeners = []
+        self._value = FUTURE_PENDING
         if fun is not None:
             def future():
-                self.set(fun())
+                try:
+                    result = fun()
+                except Exception as e:
+                    self.throw(e)
+                else:
+                    self.set(result)
             gethub().do_spawn(future)
 
     def get(self):
-        if hasattr(self, '_value'):
-            return self._value
+        val = self._value
+        if val is not FUTURE_PENDING:
+            if val is FUTURE_EXCEPTION:
+                raise self._exception
+            else:
+                return val
         cur = greenlet.getcurrent()
         cur.cleanup.append(self._listeners.remove)
         self._listeners.append(cur)
         hub = cur.hub
         del cur # no cycles
         hub._self.switch()
-        return self._value
+        val = self._value
+        if val is FUTURE_EXCEPTION:
+            raise self._exception
+        else:
+            return val
 
     def set(self, value):
-        if hasattr(self, '_value'):
+        if self._value is not FUTURE_PENDING:
             raise RuntimeError("Value is already set")
         self._value = value
         lst = self._listeners
@@ -333,8 +350,16 @@ class Future(object):
         for one in lst:
             gethub().queue_task(one)
 
+    def throw(self, exception):
+        self._value = FUTURE_EXCEPTION
+        self._exception = exception
+        lst = self._listeners
+        del self._listeners
+        for one in lst:
+            gethub().queue_task(one)
+
     def check(self, value):
-        return hasattr(self, '_value')
+        return self._value is FUTURE_PENDING
 
 class Lock(Condition):
     def __init__(self):

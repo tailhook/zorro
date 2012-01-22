@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import socket
+
 from .base import Test, passive
 
 class Redis(Test):
@@ -17,6 +19,23 @@ class SingleThread(Redis):
         self.assertEquals(self.r.execute('DEL', 'test:key1'), 1)
 
     @passive
+    def test_reconnect(self):
+        self.assertEquals(self.r.execute('SET', 'test:key1', 'value'), 'OK')
+        self.r._channel._sock.shutdown(socket.SHUT_RDWR)
+        self.z.sleep(0.01)
+        self.assertEquals(self.r.execute('GET', 'test:key1'), b'value')
+        self.assertEquals(self.r.execute('DEL', 'test:key1'), 1)
+
+    @passive
+    def test_disconnect(self):
+        fut = self.r.future('SET',
+            'test:big', b'0123456789abcdef'*1000000)
+        self.r._channel._sock.shutdown(socket.SHUT_RDWR)
+        self.z.sleep(0.01)
+        with self.assertRaises(self.z.channel.PipeError):
+            fut.get()
+
+    @passive
     def test_bulk(self):
         self.assertEquals(self.r.bulk([
             ('MULTI',),
@@ -28,6 +47,7 @@ class SingleThread(Redis):
 
     @passive
     def test_keys(self):
+        self.r.execute('DEL', 'test:big')
         self.assertEquals(self.r.execute('SET', 'test:key1', 'value'), 'OK')
         self.assertEquals(self.r.execute('SET', 'test:key2', 'value'), 'OK')
         self.assertEquals(self.r.execute('KEYS', '*'),

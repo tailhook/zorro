@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+import socket
+from functools import partial
+
 from .base import Test, passive
 
 
@@ -22,6 +25,28 @@ class Simple(Mongodb):
     def test_basic(self):
         self.c.clean()
         self.c.insert({'hello': 'world'})
+        self.assertEqual([{'hello': 'world'}],
+            self.query_data({'hello': 'world'}))
+
+    @passive
+    def test_disconnect(self):
+        self.c.clean()
+        self.c.insert({'hello': 'world'})
+        fut1 = self.z.Future(partial(self.query_data, {'hello': 'world'}))
+        fut2 = self.z.Future(partial(self.query_data, {'hello': 'world'}))
+        self.c._conn._channel._sock.shutdown(socket.SHUT_RDWR)
+        self.z.sleep(0.01)
+        with self.assertRaises(self.z.channel.PipeError):
+            fut1.get()
+        with self.assertRaises(self.z.channel.PipeError):
+            fut2.get()
+
+    @passive
+    def test_reconnect(self):
+        self.c.clean()
+        self.c.insert({'hello': 'world'*1000000})
+        self.c._conn._channel._sock.shutdown(socket.SHUT_RDWR)
+        self.z.sleep(0.01)
         self.assertEqual([{'hello': 'world'}],
             self.query_data({'hello': 'world'}))
 

@@ -90,3 +90,13 @@ class cached_property(object):
             return self
         res = obj.__dict__[self.name] = self.function(obj)
         return res
+
+
+class marker_object(object):
+    __slots__ = ('name',)
+
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return '<{}>'.format(self.name)
