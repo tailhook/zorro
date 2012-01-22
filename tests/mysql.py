@@ -32,6 +32,8 @@ class Simple(Mysql):
             'insert into test values (10, "11")'), (0, 1))
         self.assertEqual(set(self.m.query('select * from test').tuples()),
             set([(10, "11")]))
+        self.assertEqual(list(self.m.query('select * from test'))[0],
+            {'id': 10, 'val': "11"})
         self.assertEqual(self.m.execute(
             'insert into test values (20, "222"), (30, "3333")'), (0, 2))
         self.assertEqual(set(self.m.query('select * from test').tuples()),

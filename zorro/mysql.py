@@ -49,7 +49,7 @@ def _read_lcb(buf, pos=0):
     elif num == 254:
         return struct.unpack_from('<Q', buf, pos+1), pos+9
 
-def _read_lcs(buf, pos=0):
+def _read_lcbytes(buf, pos=0):
     num = buf[pos]
     pos += 1
     if num < 251:
@@ -66,6 +66,24 @@ def _read_lcs(buf, pos=0):
         num = struct.unpack_from('<Q', buf, pos)
         pos += 8
     return buf[pos:pos+num], pos+num
+
+def _read_lcstr(buf, pos=0):
+    num = buf[pos]
+    pos += 1
+    if num < 251:
+        pass
+    elif num == 251:
+        return None, pos
+    elif num == 252:
+        num = struct.unpack_from('<H', buf, pos)
+        pos += 2
+    elif num == 253:
+        num = buf[pos] + (buf[pos+1] << 8) + (buf[pos+2] << 16)
+        pos += 3
+    elif num == 254:
+        num = struct.unpack_from('<Q', buf, pos)
+        pos += 8
+    return buf[pos:pos+num].decode('utf-8'), pos+num
 
 
 class MysqlError(Exception):
@@ -86,18 +104,18 @@ class Field(_Field):
 
     @classmethod
     def parse_packet(cls, packet, pos=0):
-        catalog, pos = _read_lcs(packet, pos)
-        db, pos = _read_lcs(packet, pos)
-        table, pos = _read_lcs(packet, pos)
-        org_table, pos = _read_lcs(packet, pos)
-        name, pos = _read_lcs(packet, pos)
-        org_name, pos = _read_lcs(packet, pos)
+        catalog, pos = _read_lcstr(packet, pos)
+        db, pos = _read_lcstr(packet, pos)
+        table, pos = _read_lcstr(packet, pos)
+        org_table, pos = _read_lcstr(packet, pos)
+        name, pos = _read_lcstr(packet, pos)
+        org_name, pos = _read_lcstr(packet, pos)
         pos += 1
         charset, length, type, flags, decimals \
             = FIELD_STR.unpack_from(packet, pos)
         pos += FIELD_STR.size + 2
         if len(packet) > pos:
-            default = _read_lcs(packet, pos)
+            default = _read_lcstr(packet, pos)
         else:
             default = None
         return cls(catalog, db, table, org_table, name, org_name,
@@ -114,14 +132,22 @@ class Resultset(object):
 
     def __iter__(self):
         for rpacket in self.reply[self.nfields+2:-1]:
-            print("ROW", rpacket)
+            row = {}
+            pos = 0
+            for f in self.fields:
+                col, pos = _read_lcbytes(rpacket, pos)
+                cvt = FIELD_MAPPING.get(f.type)
+                if cvt is None:
+                    raise RuntimeError('{} is not supported'.format(f.type))
+                row[f.name] = cvt(col)
+            yield row
 
     def tuples(self):
         buf = []
         for rpacket in self.reply[self.nfields+2:-1]:
             pos = 0
             for f in self.fields:
-                col, pos = _read_lcs(rpacket, pos)
+                col, pos = _read_lcbytes(rpacket, pos)
                 cvt = FIELD_MAPPING.get(f.type)
                 if cvt is None:
                     raise RuntimeError('{} is not supported'.format(f.type))
