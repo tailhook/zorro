@@ -6,6 +6,12 @@ Mongodb:
 Redis:
  * implement memcached-style sharding
 
+Mysql:
+ * implement error reporting
+ * implement date types
+ * add tests for all data types for binary and text forms
+ * test and fix handling of nulls in arguments and returns
+
 Dependency Injection:
  * establish good rules of propagating dependency changes
  * implement lazy dependency creation

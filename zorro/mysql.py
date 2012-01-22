@@ -9,10 +9,90 @@ from decimal import Decimal
 
 from .core import gethub, Lock, Future
 from . import channel
+from .util import marker_object
 
+
+PREPARED_STMT = marker_object("PREPARED_STMT")
+PREPARED_PARAMS = marker_object("PREPARED_PARAMS")
+PREPARED_COLS = marker_object("PREPARED_COLS")
+QUERY = marker_object("QUERY")
+QUERY_FIELDS = marker_object("QUERY_FIELDS")
+QUERY_ROWDATA = marker_object("QUERY_ROWDATA")
+HANDSHAKE = marker_object("HANDSHAKE")
+FLAG_BINARY = 0x0080
+FLAG_UNSIGNED = 0x0020
 
 OK_PACKET = (bytearray(b'\x00\x00\x00\x02\x00\x00\x00'),)
 FIELD_STR = struct.Struct('<HLBHB')
+
+
+def _read_lcb(buf, pos=0):
+    num = buf[pos]
+    if num < 251:
+        return num, pos+1
+    elif num == 251:
+        return None, pos+1
+    elif num == 252:
+        return struct.unpack_from('<H', buf, pos+1)[0], pos+3
+    elif num == 253:
+        return buf[pos+1] + (buf[pos+2] << 8) + (buf[pos+3] << 16), pos+4
+    elif num == 254:
+        return struct.unpack_from('<Q', buf, pos+1)[0], pos+9
+
+
+def _read_lcbytes(buf, pos=0):
+    num = buf[pos]
+    pos += 1
+    if num < 251:
+        return buf[pos:pos+num], pos+num
+    elif num == 251:
+        return None, pos
+    elif num == 252:
+        num = struct.unpack_from('<H', buf, pos)[0]
+        pos += 2
+    elif num == 253:
+        num = buf[pos] + (buf[pos+1] << 8) + (buf[pos+2] << 16)
+        pos += 3
+    elif num == 254:
+        num = struct.unpack_from('<Q', buf, pos)[0]
+        pos += 8
+    return buf[pos:pos+num], pos+num
+
+
+def _read_lcstr(buf, pos=0):
+    num = buf[pos]
+    pos += 1
+    if num < 251:
+        pass
+    elif num == 251:
+        return None, pos
+    elif num == 252:
+        num = struct.unpack_from('<H', buf, pos)[0]
+        pos += 2
+    elif num == 253:
+        num = buf[pos] + (buf[pos+1] << 8) + (buf[pos+2] << 16)
+        pos += 3
+    elif num == 254:
+        num = struct.unpack_from('<Q', buf, pos)[0]
+        pos += 8
+    return buf[pos:pos+num].decode('utf-8'), pos+num
+
+
+def _write_lcbytes(buf, data):
+    ln = len(data)
+    if ln <= 250:
+        buf.append(ln)
+    elif ln <= 0xFFFF:
+        buf += struct.pack('<H', ln)
+    elif ln <= 0xFFFFFF:
+        buf.append(ln & 0xFF)
+        buf.append((ln >> 8) & 0xFF)
+        buf.append(ln >> 16)
+    else:
+        buf += struct.pack('<Q', ln)
+    buf += data
+
+
 FIELD_MAPPING = {
     0x00: Decimal,
     0x01: int,
@@ -34,56 +114,22 @@ FIELD_MAPPING = {
     0xfd: lambda a: str(a, 'utf-8'),
     0xfe: lambda a: str(a, 'utf-8'),
     }
-
-
-def _read_lcb(buf, pos=0):
-    num = buf[pos]
-    if num < 251:
-        return num, pos+1
-    elif num == 251:
-        return None, pos+1
-    elif num == 252:
-        return struct.unpack_from('<H', buf, pos+1), pos+3
-    elif num == 253:
-        return buf[pos+1] + (buf[pos+2] << 8) + (buf[pos+3] << 16), pos+4
-    elif num == 254:
-        return struct.unpack_from('<Q', buf, pos+1), pos+9
-
-def _read_lcbytes(buf, pos=0):
-    num = buf[pos]
-    pos += 1
-    if num < 251:
-        return buf[pos:pos+num], pos+num
-    elif num == 251:
-        return None, pos
-    elif num == 252:
-        num = struct.unpack_from('<H', buf, pos)
-        pos += 2
-    elif num == 253:
-        num = buf[pos] + (buf[pos+1] << 8) + (buf[pos+2] << 16)
-        pos += 3
-    elif num == 254:
-        num = struct.unpack_from('<Q', buf, pos)
-        pos += 8
-    return buf[pos:pos+num], pos+num
-
-def _read_lcstr(buf, pos=0):
-    num = buf[pos]
-    pos += 1
-    if num < 251:
-        pass
-    elif num == 251:
-        return None, pos
-    elif num == 252:
-        num = struct.unpack_from('<H', buf, pos)
-        pos += 2
-    elif num == 253:
-        num = buf[pos] + (buf[pos+1] << 8) + (buf[pos+2] << 16)
-        pos += 3
-    elif num == 254:
-        num = struct.unpack_from('<Q', buf, pos)
-        pos += 8
-    return buf[pos:pos+num].decode('utf-8'), pos+num
+FIELD_BIN_READERS = {
+    0x01: lambda buf, pos: (buf[pos], pos+1),
+    0x02: lambda buf, pos: (struct.unpack_from('<H', buf, pos)[0], pos+2),
+    0x03: lambda buf, pos: (struct.unpack_from('<L', buf, pos)[0], pos+4),
+    0x04: lambda buf, pos: (struct.unpack_from('<f', buf, pos)[0], pos+4),
+    0x05: lambda buf, pos: (struct.unpack_from('<d', buf, pos)[0], pos+8),
+    0x08: lambda buf, pos: (struct.unpack_from('<Q', buf, pos)[0], pos+8),
+    0x0f: _read_lcstr,
+    0xf7: _read_lcstr,
+    0xf9: _read_lcbytes,
+    0xfa: _read_lcbytes,
+    0xfb: _read_lcbytes,
+    0xfc: _read_lcbytes,
+    0xfd: _read_lcstr,
+    0xfe: _read_lcstr,
+    }
 
 
 class MysqlError(Exception):
@@ -131,6 +177,10 @@ class Resultset(object):
         self.reply = reply
 
     def __iter__(self):
+        raise RuntimeError("Can directly iterate only on resultset from"
+            " prepared statement. Use dicts() or tuples() methods")
+
+    def dicts(self):
         for rpacket in self.reply[self.nfields+2:-1]:
             row = {}
             pos = 0
@@ -154,6 +204,74 @@ class Resultset(object):
                 buf.append(cvt(col))
             yield tuple(buf)
             del buf[:]
+
+class BinaryResultset(object):
+
+    def __init__(self, cls, reply, nfields, extra):
+        self.row_class = cls
+        self.nfields = nfields
+        self.extra = extra
+        self.fields = [Field.parse_packet(fp) for fp in reply[1:nfields+1]]
+        self.reply = reply
+
+    def __iter__(self):
+        row = []
+        for rpacket in self.reply[self.nfields+2:-1]:
+            nbytes = (self.nfields+2+7)//8
+            pos = 1+nbytes
+            mask = rpacket[1:pos]
+            for f in self.fields:
+                # TODO(tailhook) check bit mask
+                read = FIELD_BIN_READERS.get(f.type)
+                if read is None:
+                    raise RuntimeError('{} is not supported'.format(f.type))
+                val, pos = read(rpacket, pos)
+                row.append(val)
+            yield self.row_class(*row)
+            del row[:]
+
+    def dicts(self):
+        for rpacket in self.reply[self.nfields+2:-1]:
+            row = {}
+            pos = 0
+            for f in self.fields:
+                read = FIELD_BIN_READERS.get(f.type)
+                if read is None:
+                    raise RuntimeError('{} is not supported'.format(f.type))
+                val, pos = read(rpacket, pos)
+                row[f.name] = val
+            yield row
+
+    def tuples(self):
+        row = []
+        for rpacket in self.reply[self.nfields+2:-1]:
+            pos = 0
+            for f in self.fields:
+                read = FIELD_BIN_READERS.get(f.type)
+                if read is None:
+                    raise RuntimeError('{} is not supported'.format(f.type))
+                val, pos = read(rpacket, pos)
+                row.append(val)
+            yield tuple(row)
+            del row[:]
+
+
+class PreparedStatement(object):
+
+    def __init__(self, text, id, fields, params):
+        self.text = text
+        self.id = id
+        self.bound = False
+        self.fields = fields
+        self.params = params
+        if self.fields:
+            self.row_class = namedtuple('Row', [f.name for f in fields])
+
+    def write_binding(self, buf):
+        buf += b'\x01'
+        for param in self.params:
+            buf += struct.pack('<H', param.type)
+        return buf
 
 
 execute_result = namedtuple('ExecuteResult', 'insert_id affected_rows')
@@ -229,7 +347,7 @@ class Channel(channel.PipelinedReqChannel):
 
     def _connect(self, user, password, database):
         fut = Future()
-        self._producing.append((None, fut))
+        self._producing.append((HANDSHAKE, fut))
         try:
             self._sock.connect(self.__addr)
         except socket.error as e:
@@ -239,7 +357,8 @@ class Channel(channel.PipelinedReqChannel):
                 raise
         handshake, = fut.get()
 
-        assert handshake[0] == 10, "Wrong protocol version"
+        assert handshake[0] == 10, "Wrong protocol version {}".format(
+            handshake[0])
         prefix, suffix = handshake[0:].split(b'\0', 1)
         self.thread_id, scramble, caplow, self.language, \
         self.status, caphigh, scrlen = struct.unpack_from('<L8sxHBHHB', suffix)
@@ -270,11 +389,7 @@ class Channel(channel.PipelinedReqChannel):
             buf += b'\x00'
         buf += database.encode('ascii')
         buf += b'\x00'
-        ln = len(buf)-4
-        buf[0] = ln & 0xFF
-        buf[1] = (ln >> 8) & 0xFF
-        buf[2] = (ln >> 16) & 0xFF
-        value = self.request(buf).get()
+        value = self.request(buf, HANDSHAKE).get()
         assert value == OK_PACKET, value
 
     def sender(self):
@@ -289,6 +404,10 @@ class Channel(channel.PipelinedReqChannel):
                 self.wait_requests()
             wait_write(sock)
             for chunk in self.get_pending_requests():
+                ln = len(chunk)-4
+                chunk[0] = ln & 0xFF
+                chunk[1] = (ln >> 8) & 0xFF
+                chunk[2] = (ln >> 16) & 0xFF
                 add_chunk(chunk)
             try:
                 bytes = sock.send(buf)
@@ -309,8 +428,6 @@ class Channel(channel.PipelinedReqChannel):
         add_chunk = buf.extend
         pos = 0
         current = []
-        fields = False
-        handshake = 0
 
         while True:
             if pos*2 > len(buf):
@@ -333,24 +450,62 @@ class Channel(channel.PipelinedReqChannel):
                     continue
                 num = buf[pos+3]
                 ptype = buf[pos+4]
-                current.append(buf[pos+4:pos+length+4])
-                if handshake < 2:
-                    ptype = 0
-                    handshake += 1
-                else:
-                    assert num == len(current), (current, num)
-                if ptype in (0, 0xff):
-                    self.produce(tuple(current))
-                    del current[:]
-                    fields = False
-                elif ptype == 0xfe:
-                    if fields:
-                        self.produce(tuple(current))
-                        del current[:]
-                        fields = False
-                    else:
-                        fields = True
+                self.produce(buf[pos+4:pos+length+4])
                 pos += length+4
+
+    def produce(self, value):
+        state = self.__dict__.setdefault('_state', self._producing[0][0])
+        if state is HANDSHAKE:
+            del self._state
+            self._producing.popleft()[1].set((value,))
+        elif value[0] == 0xff:
+            self._cur_producing.append(value)
+            self._do_produce()
+        elif state is QUERY:
+            if value[0] == 0x00:
+                del self._state
+                self._producing.popleft()[1].set((value,))
+            else:
+                self._cur_producing.append(value)
+                self._state = QUERY_FIELDS
+        elif state is QUERY_FIELDS:
+            self._cur_producing.append(value)
+            if value[0] == 0xfe:
+                self._state = QUERY_ROWDATA
+        elif state is QUERY_ROWDATA:
+            self._cur_producing.append(value)
+            if value[0] == 0xfe:
+                self._do_produce()
+        elif state is PREPARED_STMT:
+            self._cur_producing.append(value)
+            cols, params = struct.unpack_from('<5xHH', value)
+            if params:
+                self._state = PREPARED_PARAMS
+            elif cols:
+                self._state = PREPARED_COLS
+            else:
+                self._do_produce()
+        elif state is PREPARED_PARAMS:
+            self._cur_producing.append(value)
+            if value[0] == 0xfe:
+                cols, = struct.unpack_from('<5xH', self._cur_producing[0])
+                if cols:
+                    self._state = PREPARED_COLS
+                else:
+                    self._do_produce()
+        elif state is PREPARED_COLS:
+            self._cur_producing.append(value)
+            if value[0] == 0xfe:
+                self._do_produce()
+        else:
+            raise NotImplementedError(state)
+
+    def _do_produce(self):
+        res = tuple(self._cur_producing)
+        del self._cur_producing[:]
+        del self._state
+        self._producing.popleft()[1].set(res)
+
 
 
 class Mysql(object):
@@ -371,6 +526,7 @@ class Mysql(object):
         if not self._channel:
             with self._channel_lock:
                 if not self._channel:
+                    self._prepared = {}  # empty on reconnect
                     self._channel = Channel(
                         self.host, self.port,
                         unixsock=self.unixsock)
@@ -383,11 +539,10 @@ class Mysql(object):
         buf = bytearray(b'\x00\x00\x00\x00')
         buf += b'\x03'
         buf += query.encode('utf-8')
-        ln = len(buf)-4
-        buf[0] = ln & 0xFF
-        buf[1] = (ln >> 8) & 0xFF
-        buf[2] = (ln >> 16) & 0xFF
-        reply = chan.request(buf).get()
+        reply = chan.request(buf, QUERY).get()
+        return self._parse_execute(reply, query)
+
+    def _parse_execute(self, reply, query):
         assert len(reply) == 1, "Use query for queries that return result set"
         reply = reply[0]
         assert reply[0] == 0, reply
@@ -402,14 +557,9 @@ class Mysql(object):
 
     def query(self, query):
         chan = self.channel()
-        buf = bytearray(b'\x00\x00\x00\x00')
-        buf += b'\x03'
+        buf = bytearray(b'\x00\x00\x00\x00\x03')
         buf += query.encode('utf-8')
-        ln = len(buf)-4
-        buf[0] = ln & 0xFF
-        buf[1] = (ln >> 8) & 0xFF
-        buf[2] = (ln >> 16) & 0xFF
-        reply = chan.request(buf).get()
+        reply = chan.request(buf, QUERY).get()
         assert reply[0][0] not in (0, 0xFF, 0xFE), \
             "Use execute for statements that does not return a result set"
         nfields, pos = _read_lcb(reply[0], 0)
@@ -418,3 +568,89 @@ class Mysql(object):
         else:
             extra = 0
         return Resultset(reply, nfields, extra)
+
+    def prepare(self, chan, query):
+        buf = bytearray(b'\x00\x00\x00\x00\x16')
+        buf += query.encode('utf-8')
+        reply = chan.request(buf, PREPARED_STMT).get()
+        stmt_id, ncols, nparams, warnings \
+            = struct.unpack_from('<xLHHxH', reply[0])
+        if warnings:
+            warnings.warn("{0} warnings for query {0!r}", warnings, query)
+        params = []
+        for pack in reply[1:nparams+1]:
+            params.append(Field.parse_packet(pack))
+        if nparams:
+            fstart = nparams+2
+        else:
+            fstart = 1
+        fields = []
+        for pack in reply[fstart:fstart+ncols]:
+            fields.append(Field.parse_packet(pack))
+        stmt = PreparedStatement(query, stmt_id, fields, params)
+        self._prepared[query] = stmt
+        return stmt
+
+    def execute_prepared(self, query, *args):
+        chan = self.channel()
+        stmt = self._prepared.get(query, None)
+        if stmt is None:
+            stmt = self.prepare(chan, query)
+
+        if len(args) != len(stmt.params):
+            raise TypeError("Wrong number of parameters to prepared statement")
+        buf = bytearray(b'\x00\x00\x00\x00\x17')
+        buf += struct.pack('<L5x', stmt.id)
+        la = len(args)
+        for i in range(0, la, 8):
+            byte = 0
+            for j in range(i, min(i+8, la)):
+                if args[j] is None:
+                    byte |= 1 << j
+            buf.append(byte)
+        if not stmt.bound:
+            stmt.write_binding(buf)
+        for a in args:
+            if not isinstance(a, bytes):
+                a = str(a).encode('utf-8')
+            _write_lcbytes(buf, a)
+        reply = chan.request(buf, QUERY).get()
+        res = self._parse_execute(reply, query)
+        stmt.bound = True
+        return res
+
+    def query_prepared(self, query, *args):
+        chan = self.channel()
+        stmt = self._prepared.get(query, None)
+        if stmt is None:
+            stmt = self.prepare(chan, query)
+
+        if len(args) != len(stmt.params):
+            raise TypeError("Wrong number of parameters to prepared statement")
+        buf = bytearray(b'\x00\x00\x00\x00\x17')
+        buf += struct.pack('<L5x', stmt.id)
+        la = len(args)
+        for i in range(0, la, 8):
+            byte = 0
+            for j in range(i, min(i+8, la)):
+                if args[j] is None:
+                    byte |= 1 << j
+            buf.append(byte)
+        if not stmt.bound:
+            stmt.write_binding(buf)
+        for a in args:
+            if not isinstance(a, bytes):
+                a = str(a).encode('utf-8')
+            _write_lcbytes(buf, a)
+        reply = chan.request(buf, QUERY).get()
+        assert reply[0][0] not in (0, 0xFF, 0xFE), \
+            "Use execute for statements that does not return a result set"
+        nfields, pos = _read_lcb(reply[0], 0)
+        if pos < len(reply[0]):
+            extra, pos = _read_lcb(reply[0], pos)
+        else:
+            extra = 0
+        stmt.bound = True
+        return BinaryResultset(stmt.row_class, reply, nfields, extra)
+
+
