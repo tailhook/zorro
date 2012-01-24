@@ -42,9 +42,9 @@ class TestZeromq(Test):
     def make_request(self):
         sock = self.z.zmq.req_socket()
         sock.connect('tcp://127.0.0.1:9999')
-        self.assertEquals(sock.request([b"hello", b"world"]),
+        self.assertEquals(sock.request([b"hello", b"world"]).get(),
             [b"world", b"hello"])
-        self.assertEquals(sock.request([b"abra", b"kadabra"]),
+        self.assertEquals(sock.request([b"abra", b"kadabra"]).get(),
             [b"kadabra", b"abra"])
 
     @interactive(make_request)
