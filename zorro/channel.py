@@ -14,6 +14,8 @@ class BaseChannel(object):
         self._alive = True
         self._pending = deque()
         self._cond = Condition()
+
+    def _start(self):
         hub = gethub()
         hub.do_spawnhelper(self._sender_wrapper)
         hub.do_spawnhelper(self._receiver_wrapper)
@@ -75,6 +77,8 @@ class PipelinedReqChannel(BaseChannel):
             fut.throw(PipeError())
 
     def produce(self, value):
+        if not self._alive:
+            raise ShutdownException()
         val = self._cur_producing.append(value)
         num = self._producing[0][0]
         if num is None:
@@ -130,6 +134,8 @@ class MuxReqChannel(BaseChannel):
         self._cond.notify()
 
     def produce(self, id, data):
+        if not self._alive:
+            raise ShutdownException()
         fut = self.requests.pop(id, None)
         if fut is not None:
             fut.set(data)

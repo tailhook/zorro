@@ -46,6 +46,7 @@ class Channel(channel.MuxReqChannel):
             else:
                 raise
         self._counter = 0
+        self._start()
 
     def new_id(self):
         self._counter += 1

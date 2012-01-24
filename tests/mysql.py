@@ -50,6 +50,11 @@ class Simple(Mysql):
             'select * from test where id < ?', 30)),
             set([(12, "11"), (22, "222")]))
 
+    @passive
+    def test_error(self):
+        with self.assertRaises(self.z.mysql.MysqlError):
+            self.m.execute('hello world')
+
 
 
 if __name__ == '__main__':

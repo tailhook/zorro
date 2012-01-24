@@ -324,8 +324,16 @@ class Capabilities(object):
 class Channel(channel.PipelinedReqChannel):
     BUFSIZE = 16384
 
-    def __init__(self, host, port, unixsock):
-        super().__init__()
+    def connect(self, host, port, unixsock, user, password, database):
+        try:
+            return self._connect(host, port, unixsock,
+                                 user, password, database)
+        except Exception:
+            self._alive = False
+            raise
+
+    def _connect(self, host, port, unixsock, user, password, database):
+        sock = None
         if host == 'localhost':
             if os.path.exists(unixsock):
                 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -336,25 +344,16 @@ class Channel(channel.PipelinedReqChannel):
             addr = (host, port)
         self._sock = sock
         self._sock.setblocking(0)
-        self.__addr = addr
-
-    def connect(self, user, password, database):
-        try:
-            return self._connect(user, password, database)
-        except Exception:
-            self._alive = False
-            raise
-
-    def _connect(self, user, password, database):
         fut = Future()
         self._producing.append((HANDSHAKE, fut))
         try:
-            self._sock.connect(self.__addr)
+            self._sock.connect(addr)
         except socket.error as e:
             if e.errno == errno.EINPROGRESS:
                 gethub().do_write(self._sock)
             else:
                 raise
+        self._start()
         handshake, = fut.get()
 
         assert handshake[0] == 10, "Wrong protocol version {}".format(
@@ -390,6 +389,8 @@ class Channel(channel.PipelinedReqChannel):
         buf += database.encode('ascii')
         buf += b'\x00'
         value = self.request(buf, HANDSHAKE).get()
+        if value[-1] == 0xff:
+            self._parse_error(value[-1])
         assert value == OK_PACKET, value
 
     def sender(self):
@@ -414,6 +415,8 @@ class Channel(channel.PipelinedReqChannel):
             except socket.error as e:
                 if e.errno in (errno.EAGAIN, errno.EINTR):
                     continue
+                elif e.errno in (errno.EPIPE, errno.ECONNRESET):
+                    raise EOFError()
                 else:
                     raise
             if not bytes:
@@ -442,6 +445,8 @@ class Channel(channel.PipelinedReqChannel):
             except socket.error as e:
                 if e.errno in (errno.EAGAIN, errno.EINTR):
                     continue
+                elif e.errno in (errno.EPIPE, errno.ECONNRESET):
+                    raise EOFError()
                 else:
                     raise
             while len(buf)-pos >= 4:
@@ -454,6 +459,8 @@ class Channel(channel.PipelinedReqChannel):
                 pos += length+4
 
     def produce(self, value):
+        if not self._alive:
+            raise channel.ShutdownException()
         state = self.__dict__.setdefault('_state', self._producing[0][0])
         if state is HANDSHAKE:
             del self._state
@@ -527,11 +534,12 @@ class Mysql(object):
             with self._channel_lock:
                 if not self._channel:
                     self._prepared = {}  # empty on reconnect
-                    self._channel = Channel(
-                        self.host, self.port,
-                        unixsock=self.unixsock)
-                    self._channel.connect(self.user, self.password,
+                    chan = Channel()
+                    chan.connect(self.host, self.port,
+                        unixsock=self.unixsock,
+                        user=self.user, password=self.password,
                         database=self.database)
+                    self._channel = chan
         return self._channel
 
     def execute(self, query):
@@ -540,6 +548,8 @@ class Mysql(object):
         buf += b'\x03'
         buf += query.encode('utf-8')
         reply = chan.request(buf, QUERY).get()
+        if reply[-1][0] == 0xff:
+            self._parse_error(reply[-1])
         return self._parse_execute(reply, query)
 
     def _parse_execute(self, reply, query):
@@ -549,10 +559,11 @@ class Mysql(object):
         pos = 1
         affected_rows, pos = _read_lcb(reply, pos)
         insert_id, pos = _read_lcb(reply, pos)
-        server_status, warning_count = struct.unpack_from('<HH', reply, pos)
+        server_status, nwarn = struct.unpack_from('<HH', reply, pos)
         pos += 4
-        if warning_count:
-            warnings.warn("Query {0!r} caused warnings".format(query))
+        if nwarn:
+            warnings.warn("Query {!r} caused {} warnings"
+                .format(query, nwarn))
         return execute_result(insert_id, affected_rows)
 
     def query(self, query):
@@ -560,6 +571,8 @@ class Mysql(object):
         buf = bytearray(b'\x00\x00\x00\x00\x03')
         buf += query.encode('utf-8')
         reply = chan.request(buf, QUERY).get()
+        if reply[-1][0] == 0xff:
+            self._parse_error(reply[-1])
         assert reply[0][0] not in (0, 0xFF, 0xFE), \
             "Use execute for statements that does not return a result set"
         nfields, pos = _read_lcb(reply[0], 0)
@@ -569,14 +582,27 @@ class Mysql(object):
             extra = 0
         return Resultset(reply, nfields, extra)
 
-    def prepare(self, chan, query):
+    def _parse_error(self, packet):
+        if packet[3] == 35: # it's '#'
+            errno, code = struct.unpack_from('<xHx5s', packet)
+            raise MysqlError(errno,
+                             code.decode('ascii'),
+                             packet[9:].decode('utf-8'))
+        else:
+            errno, = struct.unpack_from('<xH', packet)
+            raise MysqlError(errno, '?', packet[3:].decode('utf-8'))
+
+    def _prepare(self, chan, query):
         buf = bytearray(b'\x00\x00\x00\x00\x16')
         buf += query.encode('utf-8')
         reply = chan.request(buf, PREPARED_STMT).get()
-        stmt_id, ncols, nparams, warnings \
+        if reply[-1][0] == 0xff:
+            self._parse_error(reply[-1])
+        stmt_id, ncols, nparams, nwarn \
             = struct.unpack_from('<xLHHxH', reply[0])
-        if warnings:
-            warnings.warn("{0} warnings for query {0!r}", warnings, query)
+        if nwarn:
+            warnings.warn("Query {!r} caused {} warnings"
+                .format(query, nwarn))
         params = []
         for pack in reply[1:nparams+1]:
             params.append(Field.parse_packet(pack))
@@ -595,10 +621,11 @@ class Mysql(object):
         chan = self.channel()
         stmt = self._prepared.get(query, None)
         if stmt is None:
-            stmt = self.prepare(chan, query)
+            stmt = self._prepare(chan, query)
 
         if len(args) != len(stmt.params):
-            raise TypeError("Wrong number of parameters to prepared statement")
+            raise TypeError("Expected {} parameters got {}".format(
+                len(stmt.params), len(args)))
         buf = bytearray(b'\x00\x00\x00\x00\x17')
         buf += struct.pack('<L5x', stmt.id)
         la = len(args)
@@ -615,6 +642,8 @@ class Mysql(object):
                 a = str(a).encode('utf-8')
             _write_lcbytes(buf, a)
         reply = chan.request(buf, QUERY).get()
+        if reply[-1][0] == 0xff:
+            self._parse_error(reply[-1])
         res = self._parse_execute(reply, query)
         stmt.bound = True
         return res
@@ -623,7 +652,7 @@ class Mysql(object):
         chan = self.channel()
         stmt = self._prepared.get(query, None)
         if stmt is None:
-            stmt = self.prepare(chan, query)
+            stmt = self._prepare(chan, query)
 
         if len(args) != len(stmt.params):
             raise TypeError("Wrong number of parameters to prepared statement")
@@ -643,6 +672,8 @@ class Mysql(object):
                 a = str(a).encode('utf-8')
             _write_lcbytes(buf, a)
         reply = chan.request(buf, QUERY).get()
+        if reply[-1][0] == 0xff:
+            self._parse_error(reply[-1])
         assert reply[0][0] not in (0, 0xFF, 0xFE), \
             "Use execute for statements that does not return a result set"
         nfields, pos = _read_lcb(reply[0], 0)

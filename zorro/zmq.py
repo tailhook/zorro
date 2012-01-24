@@ -111,6 +111,7 @@ class ReqChannel(channel.MuxReqChannel):
         super().__init__()
         self.init_id()
         self._sock = context().socket(zmq.XREQ)
+        self._start()
 
     def init_id(self):
         self.prefix = struct.pack('HHL',
