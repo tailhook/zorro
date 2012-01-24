@@ -186,10 +186,13 @@ class Resultset(object):
             pos = 0
             for f in self.fields:
                 col, pos = _read_lcbytes(rpacket, pos)
-                cvt = FIELD_MAPPING.get(f.type)
-                if cvt is None:
-                    raise RuntimeError('{} is not supported'.format(f.type))
-                row[f.name] = cvt(col)
+                if col is None:
+                    row[f.name] = None
+                else:
+                    cvt = FIELD_MAPPING.get(f.type)
+                    if cvt is None:
+                        raise RuntimeError('{} is not supported'.format(f.type))
+                    row[f.name] = cvt(col)
             yield row
 
     def tuples(self):
