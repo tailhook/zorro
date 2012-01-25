@@ -455,7 +455,7 @@ class Channel(channel.PipelinedReqChannel):
             while len(buf)-pos >= 4:
                 length = buf[pos] + (buf[pos+1] << 8) + (buf[pos+2] << 16)
                 if len(buf)-pos < length+4:
-                    continue
+                    break
                 num = buf[pos+3]
                 ptype = buf[pos+4]
                 self.produce(buf[pos+4:pos+length+4])

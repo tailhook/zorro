@@ -105,7 +105,7 @@ class Channel(channel.MuxReqChannel):
             while len(buf)-pos >= 16:
                 length, resp_to = struct.unpack_from('<i4xi', buf, pos)
                 if len(buf)-pos < length:
-                    continue
+                    break
                 self.produce(resp_to, buf[pos:pos+length])
                 pos += length
 
