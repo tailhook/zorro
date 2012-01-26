@@ -4,6 +4,8 @@ import struct
 import os.path
 import hashlib
 import warnings
+import string
+from datetime import date, time, datetime, timedelta
 from collections import namedtuple
 from decimal import Decimal
 
@@ -24,6 +26,46 @@ FLAG_UNSIGNED = 0x0020
 
 OK_PACKET = (bytearray(b'\x00\x00\x00\x02\x00\x00\x00'),)
 FIELD_STR = struct.Struct('<HLBHB')
+
+RESERVED = frozenset((
+    'accessible', 'add', 'all', 'alter', 'analyze', 'and', 'as', 'asc',
+    'asensitive', 'before', 'between', 'bigint', 'binary', 'blob', 'both',
+    'by', 'call', 'cascade', 'case', 'change', 'char', 'character', 'check',
+    'collate', 'column', 'condition', 'constraint', 'continue', 'convert',
+    'create', 'cross', 'current_date', 'current_time', 'current_timestamp',
+    'current_user', 'cursor', 'database', 'databases', 'day_hour',
+    'day_microsecond', 'day_minute', 'day_second', 'dec', 'decimal', 'declare',
+    'default', 'delayed', 'delete', 'desc', 'describe', 'deterministic',
+    'distinct', 'distinctrow', 'div', 'double', 'drop', 'dual', 'each', 'else',
+    'elseif', 'enclosed', 'escaped', 'exists', 'exit', 'explain', 'false',
+    'fetch', 'float', 'float4', 'float8', 'for', 'force', 'foreign', 'from',
+    'fulltext', 'general', 'grant', 'group', 'having', 'high_priority',
+    'hour_microsecond', 'hour_minute', 'hour_second', 'if', 'ignore',
+    'ignore_server_ids', 'in', 'index', 'infile', 'inner', 'inout',
+    'insensitive', 'insert', 'int', 'int1', 'int2', 'int3', 'int4', 'int8',
+    'integer', 'interval', 'into', 'is', 'iterate', 'join', 'key', 'keys',
+    'kill', 'leading', 'leave', 'left', 'like', 'limit', 'linear', 'lines',
+    'load', 'localtime', 'localtimestamp', 'lock', 'long', 'longblob',
+    'longtext', 'loop', 'low_priority', 'master_heartbeat_period',
+    'master_ssl_verify_server_cert', 'match', 'maxvalue', 'mediumblob',
+    'mediumint', 'mediumtext', 'middleint', 'minute_microsecond',
+    'minute_second', 'mod', 'modifies', 'natural', 'not', 'no_write_to_binlog',
+    'null', 'numeric', 'on', 'optimize', 'option', 'optionally', 'or', 'order',
+    'out', 'outer', 'outfile', 'precision', 'primary', 'procedure', 'purge',
+    'range', 'read', 'reads', 'read_write', 'real', 'references', 'regexp',
+    'release', 'rename', 'repeat', 'replace', 'require', 'resignal',
+    'restrict', 'return', 'revoke', 'right', 'rlike', 'schema', 'schemas',
+    'second_microsecond', 'select', 'sensitive', 'separator', 'set', 'show',
+    'signal', 'slow[d]', 'smallint', 'spatial', 'specific', 'sql',
+    'sqlexception', 'sqlstate', 'sqlwarning', 'sql_big_result',
+    'sql_calc_found_rows', 'sql_small_result', 'ssl', 'starting',
+    'straight_join', 'table', 'terminated', 'then', 'tinyblob', 'tinyint',
+    'tinytext', 'to', 'trailing', 'trigger', 'true', 'undo', 'union', 'unique',
+    'unlock', 'unsigned', 'update', 'usage', 'use', 'using', 'utc_date',
+    'utc_time', 'utc_timestamp', 'values', 'varbinary', 'varchar',
+    'varcharacter', 'varying', 'when', 'where', 'while', 'with', 'write',
+    'xor', 'year_month', 'zerofill'
+    ))
 
 
 def _read_lcb(buf, pos=0):
@@ -142,6 +184,67 @@ class MysqlError(Exception):
     def __str__(self):
         return '({}:{}) {}'.format(self.errno, self.sqlstate, self.message)
 
+
+class ColumnName(str):
+    __slots__ = ()
+
+
+def str_format(s):
+    return ("'%s'" % s
+        .replace('\\', r'\\')
+        .replace('\0', r'\0')
+        .replace('\'', r"\'")
+        .replace('\"', r'\"')
+        .replace('\b', r'\b')
+        .replace('\n', r'\n')
+        .replace('\r', r'\r')
+        .replace('\t', r'\t')
+        .replace('\x1A', r'\Z')
+        )
+
+
+class Formatter(string.Formatter):
+
+    def format_field(self, value, format_spec):
+        if isinstance(value, ColumnName):
+            if format_spec:
+                raise ValueError("Unknown format specification {0!r}"
+                    .format(format_spec))
+            if value in RESERVED:
+                return '`{}`'.format(value.replace('`', '``'))
+            return value
+        elif format_spec:
+            return str_format(format(value, format_spec))
+        else:
+            if isinstance(value, (int, float)):
+                return str(value)
+            elif isinstance(value, date):
+                if isinstance(value, datetime):
+                    return format(value, "'%Y-%m-%d %H:%M:%S'")
+                else:
+                    return format(value, "'%Y-%m-%d'")
+            elif isinstance(value, timedelta):
+                return ("INTERVAL '{0} {1:02d}:{2:02d}:{3:02d}.{4:06d}'"
+                    " DAY_MICROSECOND".format(value.days,
+                    value.seconds // 3600, value.seconds // 60 % 60,
+                    value.seconds % 60, value.microseconds))
+            elif isinstance(value, time):
+                return format(value, "'%H:%M:%S'")
+            elif isinstance(value, str):
+                return str_format(value)
+            elif value is None:
+                return 'NULL'
+            elif isinstance(value, bytes):
+                raise ValueError("Use prepared statements to work with bytes")
+            else:
+                return str_format(str(value))
+
+    def convert_field(self, value, conversion):
+        if conversion in {'c', 'f', 't'}:
+            # column, field, table -- same quoting
+            return ColumnName(value)
+        else:
+            return super().convert_field(value, conversion)
 
 _Field = namedtuple('_Field', 'catalog db table org_table name org_name'
         ' charsetnr length type flags decimals default')

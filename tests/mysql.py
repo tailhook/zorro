@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import socket
+import unittest
 from functools import partial
 
 from .base import Test, passive
@@ -56,7 +57,37 @@ class Simple(Mysql):
             self.m.execute('hello world')
 
 
+class TestFormat(unittest.TestCase):
+
+
+    def test_simple(self):
+        from zorro.mysql import Formatter
+        fmt = Formatter().format
+        self.assertEqual(fmt('{0}+{1}, {2}, {2:5.2f}, {3}, {4}',
+            10, -15, 0.5, "john's test", None),
+            r"10+-15, 0.5, ' 0.50', 'john\'s test', NULL"),
+
+    def test_fields(self):
+        from zorro.mysql import Formatter
+        fmt = Formatter().format
+        self.assertEqual(fmt('SELECT {0}, {0!c} FROM {1!t}', 'test', 'select'),
+            "SELECT 'test', test FROM `select`")
+
+    def test_datetime(self):
+        from datetime import date, time, datetime, timedelta
+        from zorro.mysql import Formatter
+        fmt = Formatter().format
+        self.assertEqual(fmt('{0}, {0:%Y-%m}', date(2008, 1, 7)),
+            "'2008-01-07', '2008-01'")
+        self.assertEqual(fmt('{0}, {0:%Y-%m}', datetime(2008, 1, 7)),
+            "'2008-01-07 00:00:00', '2008-01'")
+        self.assertEqual(fmt('{0}, {0:%M-%H}', time(10, 46, 12)),
+            "'10:46:12', '46-10'")
+        self.assertEqual(fmt('DATEADD({0!c}, {1})',
+            'date', timedelta(1, 3678, 33)),
+            "DATEADD(date, INTERVAL '1 01:01:18.000033' DAY_MICROSECOND)")
+
+
 
 if __name__ == '__main__':
-    import unittest
     unittest.main()
