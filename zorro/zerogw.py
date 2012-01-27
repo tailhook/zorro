@@ -12,7 +12,7 @@ from .util import cached_property
 from .di import has_dependencies, dependency
 
 
-FORM_CTYPE = 'application/x-www-form-urlencoded'
+FORM_CTYPE = b'application/x-www-form-urlencoded'
 log = logging.getLogger(__name__)
 
 
