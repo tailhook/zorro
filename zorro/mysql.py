@@ -246,6 +246,10 @@ class Formatter(string.Formatter):
         else:
             return super().convert_field(value, conversion)
 
+_formatter = Formatter()
+format = _formatter.format
+vformat = _formatter.vformat
+
 _Field = namedtuple('_Field', 'catalog db table org_table name org_name'
         ' charsetnr length type flags decimals default')
 class Field(_Field):
@@ -304,10 +308,14 @@ class Resultset(object):
             pos = 0
             for f in self.fields:
                 col, pos = _read_lcbytes(rpacket, pos)
-                cvt = FIELD_MAPPING.get(f.type)
-                if cvt is None:
-                    raise RuntimeError('{} is not supported'.format(f.type))
-                buf.append(cvt(col))
+                if col is None:
+                    buf.append(col)
+                else:
+                    cvt = FIELD_MAPPING.get(f.type)
+                    if cvt is None:
+                        raise RuntimeError('{} is not supported'
+                            .format(f.type))
+                    buf.append(cvt(col))
             yield tuple(buf)
             del buf[:]
 
@@ -476,6 +484,7 @@ class Channel(channel.PipelinedReqChannel):
         self.capabilities.multi_results = False
         self.capabilities.ssl = False
         self.capabilities.transactions = False
+        self.capabilities.no_schema = False  # for "show tables" to work
         buf = bytearray(b'\x00\x00\x00\x01')
         buf += struct.pack('<L4sB23s',
             self.capabilities.to_int()&0xFFFF,
@@ -648,7 +657,9 @@ class Mysql(object):
                     self._channel = chan
         return self._channel
 
-    def execute(self, query):
+    def execute(self, query, *args, **kw):
+        if args or kw:
+            query = vformat(query, args, kw)
         chan = self.channel()
         buf = bytearray(b'\x00\x00\x00\x00')
         buf += b'\x03'
@@ -672,7 +683,9 @@ class Mysql(object):
                 .format(query, nwarn))
         return execute_result(insert_id, affected_rows)
 
-    def query(self, query):
+    def query(self, query, *args, **kw):
+        if args or kw:
+            query = vformat(query, args, kw)
         chan = self.channel()
         buf = bytearray(b'\x00\x00\x00\x00\x03')
         buf += query.encode('utf-8')
