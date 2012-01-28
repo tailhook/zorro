@@ -10,7 +10,9 @@ from zmq import *
 
 from . import core, channel
 
+
 DEFAULT_IO_THREADS = 1
+
 
 def send_data(sock, data, address=None):
     if address is None:
@@ -50,15 +52,23 @@ def rep_responder(sock, address, callback, data):
     else:
         send_data(sock, reply, address=address)
 
+
 def rep_listener(sock, callback):
     hub = core.gethub()
+    # hooks for pools
+    get_slot = getattr(callback, 'get_slot', None)
+    free_slot = getattr(callback, 'free_slot', None)
     while True:
         hub.do_read(sock)
         while True:
+            if get_slot is not None:
+                callback = get_slot()
             try:
                 data = sock.recv_multipart(zmq.NOBLOCK)
             except zmq.ZMQError as e:
                 if e.errno == errno.EAGAIN or e.errno == errno.EINTR:
+                    if free_slot is not None:
+                        free_slot(callback)
                     break
                 else:
                     raise
@@ -67,43 +77,58 @@ def rep_listener(sock, callback):
             data = data[i+1:]
             hub.do_spawn(partial(rep_responder, sock, addr, callback, data))
 
+
 def rep_socket(callback):
     sock = context().socket(zmq.XREP)
     core.gethub().do_spawnservice(partial(rep_listener, sock, callback))
     return sock
 
+
 def sub_listener(sock, callback):
     hub = core.gethub()
+    # hooks for pools
+    get_slot = getattr(callback, 'get_slot', None)
+    free_slot = getattr(callback, 'free_slot', None)
     while True:
         hub.do_read(sock)
         while True:
+            if get_slot is not None:
+                callback = get_slot()
             try:
                 data = sock.recv_multipart(zmq.NOBLOCK)
             except zmq.ZMQError as e:
                 if e.errno == errno.EAGAIN or e.errno == errno.EINTR:
+                    if free_slot is not None:
+                        free_slot(callback)
                     break
                 else:
                     raise
             hub.do_spawn(partial(callback, *data))
+
 
 def sub_socket(callback):
     sock = context().socket(zmq.SUB)
     core.gethub().do_spawnservice(partial(sub_listener, sock, callback))
     return sock
 
+
 def pub_socket():
     return PubChannel()
+
 
 def pull_socket(callback):
     sock = context().socket(zmq.PULL)
     core.gethub().do_spawnservice(partial(sub_listener, sock, callback))
     return sock
 
+
 def push_socket():
     return PushChannel()
 
+
 def req_socket():
     return ReqChannel()
+
 
 class ReqChannel(channel.MuxReqChannel):
 
@@ -148,6 +173,7 @@ class ReqChannel(channel.MuxReqChannel):
             assert data[1] == b''
             self.produce(data[0], data[2:])
 
+
 class OutputChannel(object):
     zmq_kind = None
 
@@ -161,11 +187,13 @@ class OutputChannel(object):
     def connect(self, value):
         self._sock.connect(value)
 
+
 class PubChannel(OutputChannel):
     zmq_kind = zmq.PUB
 
     def publish(self, *args):
         send_data(self._sock, args)
+
 
 class PushChannel(OutputChannel):
     zmq_kind = zmq.PUSH
@@ -173,11 +201,13 @@ class PushChannel(OutputChannel):
     def push(self, *args):
         send_data(self._sock, args)
 
+
 def _get_fd(value):
     if isinstance(value, zmq.Socket):
         return value
     else:
         return value.fileno()
+
 
 def plug(hub, io_threads=DEFAULT_IO_THREADS):
     assert not hasattr(hub, 'zmq_context')
@@ -186,6 +216,7 @@ def plug(hub, io_threads=DEFAULT_IO_THREADS):
         POLLIN=zmq.POLLIN, POLLOUT=zmq.POLLOUT)
     hub.log_plugged(ctx, name='zmq_context')
     return ctx
+
 
 def context():
     hub = core.gethub()
