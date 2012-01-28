@@ -56,6 +56,9 @@ class JSONWebsockOutput(object):
     def unsubscribe(self, conn, topic):
         self._do_send((b'unsubscribe', cid(conn), topic))
 
+    def clone(self, source_topic, target_topic)
+        self._do_send((b'clone', blob(source_topic), blob(target_topic)))
+
     def drop(self, topic):
         self._do_send((b'drop', topic))
 
