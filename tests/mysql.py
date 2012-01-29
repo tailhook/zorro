@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import socket
 import unittest
+import datetime
 from functools import partial
 
 from .base import Test, passive
@@ -126,6 +127,30 @@ class TestTypes(Mysql):
         self.approx_test('CHAR(10)', [
             ("hello world hello world", "hello worl"),
             ])
+
+    @passive
+    def test_time(self):
+        self.exact_test('TIME', [
+            datetime.datetime.now().replace(microsecond=0).time(),
+            datetime.time(12, 3, 7),
+            ])
+
+    @passive
+    def test_time(self):
+        self.exact_test('DATE', [
+            datetime.date.today(),
+            datetime.date(2011, 3, 6),
+            ])
+
+    @passive
+    def test_datetime(self):
+        self.exact_test('DATETIME', [
+            datetime.datetime.now().replace(microsecond=0),
+            datetime.datetime(2011, 3, 6),
+            datetime.datetime(2011, 3, 6, 12, 34),
+            datetime.datetime(2011, 3, 6, 12, 34, 47),
+            ])
+
 
 
     def exact_test(self, typ, values):

@@ -134,6 +134,37 @@ def _write_lcbytes(buf, data):
         buf += struct.pack('<Q', ln)
     buf += data
 
+def _read_bintime(buf, pos):
+    ln = buf[pos]
+    assert ln >= 8
+    sign, days, hour, min, sec = struct.unpack_from('<BLBBB', buf, pos+1)
+    assert not sign and not days, 'Timedeltas are not supported'
+    return time(hour, min, sec), pos+ln+1
+
+def _read_bindate(buf, pos):
+    ln = buf[pos]
+    assert ln >= 4
+    year, month, day = struct.unpack_from('<H2B', buf, pos+1)
+    return date(year, month, day), pos+ln+1
+
+def _read_bindatetime(buf, pos):
+    ln = buf[pos]
+    assert ln >= 4
+    if ln > 7:
+        assert ln == 11
+        year, month, day, hour, min, sec, ms \
+            = struct.unpack_from('<H5BL',buf,pos+1)
+    elif ln > 4:
+        ms = 0
+        year, month, day, hour, min, sec = struct.unpack_from('<H5B',buf,pos+1)
+    else:
+        ms = 0
+        hour = 0
+        min = 0
+        sec = 0
+        year, month, day = struct.unpack_from('<H2B', buf, pos+1)
+    return datetime(year, month, day, hour, min, sec, ms), pos+ln+1
+
 
 FIELD_MAPPING = {
     0x00: Decimal,
@@ -145,6 +176,9 @@ FIELD_MAPPING = {
     0x06: lambda a: None,
     0x08: int,
     0x09: int,
+    0x0a: lambda a: datetime.strptime(str(a, 'ascii'), '%Y-%m-%d').date(),
+    0x0b: lambda a: datetime.strptime(str(a, 'ascii'), '%H:%M:%S').time(),
+    0x0c: lambda a: datetime.strptime(str(a, 'ascii'), '%Y-%m-%d %H:%M:%S'),
     0x0d: int,
     0x0f: lambda a: str(a, 'utf-8'),
     0xf6: Decimal,
@@ -168,6 +202,9 @@ FIELD_BIN_READERS = { # type, unsigned property
     (0x02, True): lambda buf, pos: (struct.unpack_from('<H', buf, pos)[0], pos+2),
     (0x03, True): lambda buf, pos: (struct.unpack_from('<L', buf, pos)[0], pos+4),
     (0x08, True): lambda buf, pos: (struct.unpack_from('<Q', buf, pos)[0], pos+8),
+    (0x0a, False): _read_bindate,
+    (0x0b, False): _read_bintime,
+    (0x0c, False): _read_bindatetime,
     (0x0f, False): _read_lcstr,
     (0xf7, False): _read_lcstr,
     (0xf9, False): _read_lcbytes,
@@ -252,8 +289,8 @@ class Formatter(string.Formatter):
             return super().convert_field(value, conversion)
 
 _formatter = Formatter()
-format = _formatter.format
-vformat = _formatter.vformat
+mysql_format = _formatter.format
+mysql_vformat = _formatter.vformat
 
 _Field = namedtuple('_Field', 'catalog db table org_table name org_name'
         ' charsetnr length type flags decimals default bin_key')
@@ -632,7 +669,7 @@ class Mysql(object):
 
     def execute(self, query, *args, **kw):
         if args or kw:
-            query = vformat(query, args, kw)
+            query = mysql_vformat(query, args, kw)
         chan = self.channel()
         buf = bytearray(b'\x00\x00\x00\x00')
         buf += b'\x03'
@@ -658,7 +695,7 @@ class Mysql(object):
 
     def query(self, query, *args, **kw):
         if args or kw:
-            query = vformat(query, args, kw)
+            query = mysql_vformat(query, args, kw)
         chan = self.channel()
         buf = bytearray(b'\x00\x00\x00\x00\x03')
         buf += query.encode('utf-8')
