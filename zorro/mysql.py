@@ -444,6 +444,16 @@ class Capabilities(object):
         return num
 
 
+def _parse_error(packet):
+    if packet[3] == 35: # it's '#'
+        errno, code = struct.unpack_from('<xHx5s', packet)
+        raise MysqlError(errno,
+                         code.decode('ascii'),
+                         packet[9:].decode('utf-8'))
+    else:
+        errno, = struct.unpack_from('<xH', packet)
+        raise MysqlError(errno, '?', packet[3:].decode('utf-8'))
+
 
 class Channel(channel.PipelinedReqChannel):
     BUFSIZE = 16384
@@ -485,6 +495,7 @@ class Channel(channel.PipelinedReqChannel):
         prefix, suffix = handshake[0:].split(b'\0', 1)
         self.thread_id, scramble, caplow, self.language, \
         self.status, caphigh, scrlen = struct.unpack_from('<L8sxHBHHB', suffix)
+        scramble += suffix[31:suffix.index(b'\x00', 31)]
         self.capabilities = Capabilities((caphigh << 16) + caplow)
         assert self.capabilities.protocol_41, "Old protocol is not supported"
         assert self.capabilities.connect_with_db
@@ -504,7 +515,7 @@ class Channel(channel.PipelinedReqChannel):
         buf += user.encode('ascii')
         buf += b'\x00'
         if password:
-            buf += '\x14'
+            buf += b'\x14'
             hash1 = hashlib.sha1(password.encode('ascii')).digest()
             hash2 = hashlib.sha1(scramble
                 + hashlib.sha1(hash1).digest()).digest()
@@ -514,8 +525,8 @@ class Channel(channel.PipelinedReqChannel):
         buf += database.encode('ascii')
         buf += b'\x00'
         value = self.request(buf, HANDSHAKE).get()
-        if value[-1] == 0xff:
-            self._parse_error(value[-1])
+        if value[-1][0] == 0xff:
+            _parse_error(value[-1])
         assert value == OK_PACKET, value
 
     def sender(self):
@@ -676,7 +687,7 @@ class Mysql(object):
         buf += query.encode('utf-8')
         reply = chan.request(buf, QUERY).get()
         if reply[-1][0] == 0xff:
-            self._parse_error(reply[-1])
+            _parse_error(reply[-1])
         return self._parse_execute(reply, query)
 
     def _parse_execute(self, reply, query):
@@ -701,7 +712,7 @@ class Mysql(object):
         buf += query.encode('utf-8')
         reply = chan.request(buf, QUERY).get()
         if reply[-1][0] == 0xff:
-            self._parse_error(reply[-1])
+            _parse_error(reply[-1])
         assert reply[0][0] not in (0, 0xFF, 0xFE), \
             "Use execute for statements that does not return a result set"
         nfields, pos = _read_lcb(reply[0], 0)
@@ -711,22 +722,12 @@ class Mysql(object):
             extra = 0
         return Resultset(reply, nfields, extra)
 
-    def _parse_error(self, packet):
-        if packet[3] == 35: # it's '#'
-            errno, code = struct.unpack_from('<xHx5s', packet)
-            raise MysqlError(errno,
-                             code.decode('ascii'),
-                             packet[9:].decode('utf-8'))
-        else:
-            errno, = struct.unpack_from('<xH', packet)
-            raise MysqlError(errno, '?', packet[3:].decode('utf-8'))
-
     def _prepare(self, chan, query):
         buf = bytearray(b'\x00\x00\x00\x00\x16')
         buf += query.encode('utf-8')
         reply = chan.request(buf, PREPARED_STMT).get()
         if reply[-1][0] == 0xff:
-            self._parse_error(reply[-1])
+            _parse_error(reply[-1])
         stmt_id, ncols, nparams, nwarn \
             = struct.unpack_from('<xLHHxH', reply[0])
         if nwarn:
@@ -774,7 +775,7 @@ class Mysql(object):
             _write_lcbytes(buf, a)
         reply = chan.request(buf, QUERY).get()
         if reply[-1][0] == 0xff:
-            self._parse_error(reply[-1])
+            _parse_error(reply[-1])
         res = self._parse_execute(reply, query)
         stmt.bound = True
         return res
@@ -804,7 +805,7 @@ class Mysql(object):
             _write_lcbytes(buf, a)
         reply = chan.request(buf, QUERY).get()
         if reply[-1][0] == 0xff:
-            self._parse_error(reply[-1])
+            _parse_error(reply[-1])
         assert reply[0][0] not in (0, 0xFF, 0xFE), \
             "Use execute for statements that does not return a result set"
         nfields, pos = _read_lcb(reply[0], 0)
