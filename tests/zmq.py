@@ -124,7 +124,7 @@ class TestPools(Test):
         sock.connect('ipc:///tmp/zorro-pool-test')
 
     @interactive(setup_reply)
-    def test_poll_rep(self):
+    def test_pool_rep(self):
         self.data = []
         ctx = zmq.Context(1)
         sock = ctx.socket(zmq.XREQ)
@@ -150,17 +150,22 @@ class TestPools(Test):
 
     def subscriber(self, name, time):
         self.data.append(name+b'_start')
-        self.z.sleep(float(time))
+        if float(time) > 0.15:
+            with self.assertRaises(self.z.pool.TimeoutError):
+                self.z.sleep(float(time))
+            self.data.append(name+b'_timeout')
+        else:
+            self.z.sleep(float(time))
         self.data.append(name+b'_end')
 
     def setup_subscr(self):
         sock = self.z.zmq.pull_socket(self.z.pool.Pool(self.subscriber,
             limit=2,
-            timeout=0.2))
+            timeout=0.15))
         sock.connect('ipc:///tmp/zorro-pool-test')
 
     @interactive(setup_subscr)
-    def test_poll_sub(self):
+    def test_pool_sub(self):
         self.data = []
         ctx = zmq.Context(1)
         sock = ctx.socket(zmq.PUSH)
@@ -179,6 +184,35 @@ class TestPools(Test):
             b'4_start',
             b'3_end',
             b'4_end',
+            ])
+
+    @interactive(setup_subscr)
+    def test_pool_timeout(self):
+        self.data = []
+        ctx = zmq.Context(1)
+        sock = ctx.socket(zmq.PUSH)
+        sock.bind('ipc:///tmp/zorro-pool-test')
+        sock.send_multipart([b'1', b"0.1"])
+        sock.send_multipart([b'2', b"0.5"])
+        sock.send_multipart([b'3', b"0.1"])
+        sock.send_multipart([b'4', b"0.1"])
+        sock.send_multipart([b'5', b"0.1"])
+        sock.send_multipart([b'6', b"0.1"])
+        time.sleep(0.7)
+        self.assertEqual(self.data, [
+            b'1_start',
+            b'2_start',
+            b'1_end',
+            b'3_start',
+            b'2_timeout',
+            b'2_end',
+            b'4_start',
+            b'3_end',
+            b'5_start',
+            b'4_end',
+            b'6_start',
+            b'5_end',
+            b'6_end',
             ])
 
 

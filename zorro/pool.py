@@ -1,5 +1,13 @@
-from .core import gethub, Condition
+from functools import partial
 
+from greenlet import getcurrent, GreenletExit
+
+from .core import gethub, Condition
+from . import sleep
+
+
+class TimeoutError(Exception):
+    pass
 
 class Pool(object):
 
@@ -12,11 +20,22 @@ class Pool(object):
 
     def __call__(self, *args, **kw):
         self.current += 1
+        cur = getcurrent()
+        killer = gethub().do_spawn(partial(self._timeout, cur))
         try:
             return self.callback(*args, **kw)
         finally:
+            if killer.gr_frame:
+                killer.detach().parent = cur
+                killer.throw(GreenletExit())
             self.current -= 1
             self._cond.notify()
+
+    def _timeout(self, task):
+        sleep(self.timeout)
+        cur = getcurrent()
+        cur.parent = task.detach()
+        raise TimeoutError()
 
     def wait_slot(self):
         while self.current >= self.limit:

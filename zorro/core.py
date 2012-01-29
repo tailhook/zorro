@@ -271,22 +271,26 @@ class Hub(object):
         let = Zorrolet(fun, self)
         self._services[let] = None
         self.queue_task(let)
+        return let
 
     def do_spawn(self, fun):
         let = Zorrolet(fun, self)
         self._tasks[let] = None
         self.queue_task(let)
+        return let
 
     def do_spawnswitch(self, fun):
         let = Zorrolet(fun, self)
         self._tasks[let] = None
         self.queue_task(greenlet.getcurrent())
         let.switch()
+        return let
 
     def do_spawnhelper(self, fun):
         let = Zorrolet(fun, self)
         self._helpers[let] = None
         self.queue_task(let)
+        return let
 
     def add_task(self, fun):
         self._start_tasks.append(fun)
