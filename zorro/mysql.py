@@ -143,6 +143,7 @@ FIELD_MAPPING = {
     0x04: float,
     0x05: float,
     0x06: lambda a: None,
+    0x08: int,
     0x09: int,
     0x0d: int,
     0x0f: lambda a: str(a, 'utf-8'),
@@ -156,21 +157,25 @@ FIELD_MAPPING = {
     0xfd: lambda a: str(a, 'utf-8'),
     0xfe: lambda a: str(a, 'utf-8'),
     }
-FIELD_BIN_READERS = {
-    0x01: lambda buf, pos: (buf[pos], pos+1),
-    0x02: lambda buf, pos: (struct.unpack_from('<H', buf, pos)[0], pos+2),
-    0x03: lambda buf, pos: (struct.unpack_from('<L', buf, pos)[0], pos+4),
-    0x04: lambda buf, pos: (struct.unpack_from('<f', buf, pos)[0], pos+4),
-    0x05: lambda buf, pos: (struct.unpack_from('<d', buf, pos)[0], pos+8),
-    0x08: lambda buf, pos: (struct.unpack_from('<Q', buf, pos)[0], pos+8),
-    0x0f: _read_lcstr,
-    0xf7: _read_lcstr,
-    0xf9: _read_lcbytes,
-    0xfa: _read_lcbytes,
-    0xfb: _read_lcbytes,
-    0xfc: _read_lcbytes,
-    0xfd: _read_lcstr,
-    0xfe: _read_lcstr,
+FIELD_BIN_READERS = { # type, unsigned property
+    (0x01, False): lambda buf, pos: (struct.unpack_from('<b', buf, pos)[0], pos+1),
+    (0x02, False): lambda buf, pos: (struct.unpack_from('<h', buf, pos)[0], pos+2),
+    (0x03, False): lambda buf, pos: (struct.unpack_from('<l', buf, pos)[0], pos+4),
+    (0x04, False): lambda buf, pos: (struct.unpack_from('<f', buf, pos)[0], pos+4),
+    (0x05, False): lambda buf, pos: (struct.unpack_from('<d', buf, pos)[0], pos+8),
+    (0x08, False): lambda buf, pos: (struct.unpack_from('<q', buf, pos)[0], pos+8),
+    (0x01, True): lambda buf, pos: (buf[pos], pos+1),
+    (0x02, True): lambda buf, pos: (struct.unpack_from('<H', buf, pos)[0], pos+2),
+    (0x03, True): lambda buf, pos: (struct.unpack_from('<L', buf, pos)[0], pos+4),
+    (0x08, True): lambda buf, pos: (struct.unpack_from('<Q', buf, pos)[0], pos+8),
+    (0x0f, False): _read_lcstr,
+    (0xf7, False): _read_lcstr,
+    (0xf9, False): _read_lcbytes,
+    (0xfa, False): _read_lcbytes,
+    (0xfb, False): _read_lcbytes,
+    (0xfc, False): _read_lcbytes,
+    (0xfd, False): _read_lcstr,
+    (0xfe, False): _read_lcstr,
     }
 
 
@@ -251,7 +256,7 @@ format = _formatter.format
 vformat = _formatter.vformat
 
 _Field = namedtuple('_Field', 'catalog db table org_table name org_name'
-        ' charsetnr length type flags decimals default')
+        ' charsetnr length type flags decimals default bin_key')
 class Field(_Field):
     __slots__ = ()
 
@@ -272,7 +277,8 @@ class Field(_Field):
         else:
             default = None
         return cls(catalog, db, table, org_table, name, org_name,
-            charset, length, type, flags, decimals, default)
+            charset, length, type, flags, decimals, default,
+            (type, bool(flags & FLAG_UNSIGNED)))
 
 
 class Resultset(object):
@@ -287,87 +293,54 @@ class Resultset(object):
         raise RuntimeError("Can directly iterate only on resultset from"
             " prepared statement. Use dicts() or tuples() methods")
 
+    def _parse_row(self, rpacket):
+        pos = 0
+        for f in self.fields:
+            col, pos = _read_lcbytes(rpacket, pos)
+            if col is None:
+                yield None
+            else:
+                cvt = FIELD_MAPPING.get(f.type)
+                if cvt is None:
+                    raise RuntimeError('{} is not supported'
+                        .format(f.type))
+                yield cvt(col)
+
     def dicts(self):
         for rpacket in self.reply[self.nfields+2:-1]:
-            row = {}
-            pos = 0
-            for f in self.fields:
-                col, pos = _read_lcbytes(rpacket, pos)
-                if col is None:
-                    row[f.name] = None
-                else:
-                    cvt = FIELD_MAPPING.get(f.type)
-                    if cvt is None:
-                        raise RuntimeError('{} is not supported'.format(f.type))
-                    row[f.name] = cvt(col)
-            yield row
+            yield {f.name: val for f, val in zip(self.fields,
+                                                 self._parse_row(rpacket))}
 
     def tuples(self):
-        buf = []
         for rpacket in self.reply[self.nfields+2:-1]:
-            pos = 0
-            for f in self.fields:
-                col, pos = _read_lcbytes(rpacket, pos)
-                if col is None:
-                    buf.append(col)
-                else:
-                    cvt = FIELD_MAPPING.get(f.type)
-                    if cvt is None:
-                        raise RuntimeError('{} is not supported'
-                            .format(f.type))
-                    buf.append(cvt(col))
-            yield tuple(buf)
-            del buf[:]
+            yield tuple(self._parse_row(rpacket))
 
-class BinaryResultset(object):
+class BinaryResultset(Resultset):
 
     def __init__(self, cls, reply, nfields, extra):
+        super().__init__(reply, nfields, extra)
         self.row_class = cls
-        self.nfields = nfields
-        self.extra = extra
         self.fields = [Field.parse_packet(fp) for fp in reply[1:nfields+1]]
-        self.reply = reply
 
     def __iter__(self):
-        row = []
         for rpacket in self.reply[self.nfields+2:-1]:
-            nbytes = (self.nfields+2+7)//8
-            pos = 1+nbytes
-            mask = rpacket[1:pos]
-            for f in self.fields:
-                # TODO(tailhook) check bit mask
-                read = FIELD_BIN_READERS.get(f.type)
-                if read is None:
-                    raise RuntimeError('{} is not supported'.format(f.type))
-                val, pos = read(rpacket, pos)
-                row.append(val)
-            yield self.row_class(*row)
-            del row[:]
+            yield self.row_class(*self._parse_row(rpacket))
 
-    def dicts(self):
-        for rpacket in self.reply[self.nfields+2:-1]:
-            row = {}
-            pos = 0
-            for f in self.fields:
-                read = FIELD_BIN_READERS.get(f.type)
-                if read is None:
-                    raise RuntimeError('{} is not supported'.format(f.type))
-                val, pos = read(rpacket, pos)
-                row[f.name] = val
-            yield row
-
-    def tuples(self):
+    def _parse_row(self, rpacket):
+        nbytes = (self.nfields+2+7)//8
         row = []
-        for rpacket in self.reply[self.nfields+2:-1]:
-            pos = 0
-            for f in self.fields:
-                read = FIELD_BIN_READERS.get(f.type)
+        pos = 1+nbytes
+        mask = rpacket[1:pos]
+        for i, f in enumerate(self.fields, 2):
+            if mask[i//8] & (1 << (i % 8)):
+                yield None
+            else:
+                read = FIELD_BIN_READERS.get(f.bin_key)
                 if read is None:
                     raise RuntimeError('{} is not supported'.format(f.type))
                 val, pos = read(rpacket, pos)
-                row.append(val)
-            yield tuple(row)
-            del row[:]
+                yield val
+
 
 
 class PreparedStatement(object):
@@ -756,7 +729,9 @@ class Mysql(object):
             buf.append(byte)
         if not stmt.bound:
             stmt.write_binding(buf)
-        for a in args:
+        else:
+            buf += b'\x00'
+        for f, a in zip(stmt.params, args):
             if not isinstance(a, bytes):
                 a = str(a).encode('utf-8')
             _write_lcbytes(buf, a)

@@ -56,6 +56,150 @@ class Simple(Mysql):
         with self.assertRaises(self.z.mysql.MysqlError):
             self.m.execute('hello world')
 
+class TestTypes(Mysql):
+
+    @passive
+    def test_tinyint(self):
+        self.exact_test('TINYINT', [1, 2, 5, 15, -20, None])
+        self.approx_test('TINYINT', [
+            (250, 127),
+            (1000, 127),
+            ])
+        self.exact_test('TINYINT(1)', [1, 2, 5, 15, -20, None])
+        self.approx_test('TINYINT(1)', [
+            (250, 127),
+            (1000, 127),
+            ])
+        self.exact_test('TINYINT UNSIGNED', [1, 2, 5, 15, None])
+        self.approx_test('TINYINT UNSIGNED', [
+            (250, 250),
+            (1000, 255),
+            (-20, 0),
+            ])
+
+    @passive
+    def test_integer(self):
+        self.exact_test('INTEGER', [10, 100, 1000, 10000, 1234567,
+            16 << 24, -100, -1000, -10000, -100000000, None])
+        self.exact_test('INTEGER UNSIGNED', [10, 100, 1000, 10000, 1234567,
+            16 << 24, (1 << 31) + 100, None])
+        self.approx_test('INTEGER', [
+            (1 << 40, (1 << 31)-1),
+            (-1 << 40, -(1 << 31)),
+            ])
+        self.approx_test('INTEGER UNSIGNED', [
+            (1 << 40, (1 << 32)-1),
+            (-1, 0),
+            ])
+
+    @passive
+    def test_bigint(self):
+        self.exact_test('BIGINT', [10, 100, 1 << 40,
+            -10, -100, -1 << 40, None])
+        self.exact_test('BIGINT UNSIGNED', [10, 100, 1 << 40,
+            (1 << 63) + 100, None])
+        self.approx_test('BIGINT', [
+            (1 << 100, (1 << 63)-1),
+            (-1 << 100, -(1 << 63)),
+            ])
+        self.approx_test('BIGINT UNSIGNED', [
+            (1 << 100, (1 << 64)-1),
+            (-1, 0),
+            ])
+
+    @passive
+    def test_varchar(self):
+        self.exact_test('VARCHAR(100)', [
+            "hello",
+            "test test test test test",
+            None,
+            ])
+
+    @passive
+    def test_char(self):
+        self.exact_test('CHAR(10)', [
+            "hello",
+            "test test",
+            "hello test",
+            None,
+            ])
+        self.approx_test('CHAR(10)', [
+            ("hello world hello world", "hello worl"),
+            ])
+
+
+    def exact_test(self, typ, values):
+        self.m.execute('drop table if exists test')
+        try:
+            self.m.execute('create table test (value {0})'.format(typ))
+            for val in values:
+                self.m.execute('insert into test (value) VALUES ({0})', val)
+
+            self.assertEqual(values, [val for val,
+                in self.m.query('select value from test').tuples()])
+            self.assertEqual(values, [val for val,
+                in self.m.query_prepared('select value from test').tuples()])
+            self.assertEqual([{'value': a} for a in values],
+                list(self.m.query('select value from test').dicts()))
+            self.assertEqual([{'value': a} for a in values],
+                list(self.m.query_prepared('select value from test').dicts()))
+            self.assertEqual(values, [val for val,
+                in self.m.query_prepared('select value from test')])
+
+            self.m.execute('delete from test')
+            for val in values:
+                self.m.execute_prepared('insert into test (value) VALUES (?)',
+                    val)
+
+            self.assertEqual(values, [val for val,
+                in self.m.query('select value from test').tuples()])
+            self.assertEqual(values, [val for val,
+                in self.m.query_prepared('select value from test').tuples()])
+            self.assertEqual([{'value': a} for a in values],
+                list(self.m.query('select value from test').dicts()))
+            self.assertEqual([{'value': a} for a in values],
+                list(self.m.query_prepared('select value from test').dicts()))
+            self.assertEqual(values, [val for val,
+                in self.m.query_prepared('select value from test')])
+        finally:
+            self.m.execute('drop table if exists test')
+
+    def approx_test(self, typ, pairs):
+        self.m.execute('drop table if exists test')
+        try:
+            self.m.execute('create table test (value {0})'.format(typ))
+            for a, b in pairs:
+                self.m.execute('insert into test (value) VALUES ({0})', a)
+
+            self.assertEqual([b for a, b in pairs], [val for val,
+                in self.m.query('select value from test').tuples()])
+            self.assertEqual([b for a, b in pairs], [val for val,
+                in self.m.query_prepared('select value from test').tuples()])
+            self.assertEqual([{'value': b} for a, b in pairs],
+                list(self.m.query('select value from test').dicts()))
+            self.assertEqual([{'value': b} for a, b in pairs],
+                list(self.m.query_prepared('select value from test').dicts()))
+            self.assertEqual([b for a, b in pairs], [val for val,
+                in self.m.query_prepared('select value from test')])
+
+            self.m.execute('delete from test')
+            for a, b in pairs:
+                self.m.execute_prepared('insert into test (value) VALUES (?)',
+                    a)
+
+            self.assertEqual([b for a, b in pairs], [val for val,
+                in self.m.query('select value from test').tuples()])
+            self.assertEqual([b for a, b in pairs], [val for val,
+                in self.m.query_prepared('select value from test').tuples()])
+            self.assertEqual([{'value': b} for a, b in pairs],
+                list(self.m.query('select value from test').dicts()))
+            self.assertEqual([{'value': b} for a, b in pairs],
+                list(self.m.query_prepared('select value from test').dicts()))
+            self.assertEqual([b for a, b in pairs], [val for val,
+                in self.m.query_prepared('select value from test')])
+        finally:
+            self.m.execute('drop table if exists test')
+
 
 class TestFormat(unittest.TestCase):
 
