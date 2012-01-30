@@ -25,7 +25,7 @@ class Pool(object):
         try:
             return self.callback(*args, **kw)
         finally:
-            if killer.gr_frame:
+            if not killer.dead:
                 killer.detach().parent = cur
                 killer.throw(GreenletExit())
             self.current -= 1
