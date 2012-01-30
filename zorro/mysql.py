@@ -799,6 +799,8 @@ class Mysql(object):
             buf.append(byte)
         if not stmt.bound:
             stmt.write_binding(buf)
+        else:
+            buf += b'\x00'
         for a in args:
             if not isinstance(a, bytes):
                 a = str(a).encode('utf-8')
