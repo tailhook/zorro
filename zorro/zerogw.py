@@ -320,9 +320,6 @@ class HTTPService(object):
         convention = getattr(target, '__zorro_convention__', None)
         if convention == 'request':
             return target(request)
-        elif convention == 'splitpath':
-            return target(*cpath[(idx or 10000)+1:].split('/'),
-                **dict(parse_qsl(request.parsed_uri.query)))
         elif convention == 'simple':
             return target(request.parsed_uri.path,
                 **dict(parse_qsl(request.parsed_uri.query)))
@@ -403,8 +400,12 @@ class TreeService(HTTPService):
             return target.dispatch(request, cpath[:next_idx])
         convention = getattr(target, '__zorro_convention__', None)
         if convention == 'splitpath':
-            return target(*cpath[(idx or 10000)+1:].split('/'),
-                **dict(parse_qsl(request.parsed_uri.query)))
+            npath = cpath[(idx or 10000)+1:]
+            if npath:
+                args = npath.split('/')
+            else:
+                args = ()
+            return target(*args, **dict(parse_qsl(request.parsed_uri.query)))
         else:
             return self._call_convention(target, request)
 
