@@ -14,6 +14,37 @@ from . import core, channel
 DEFAULT_IO_THREADS = 1
 
 
+class Socket(zmq.Socket):
+
+    def dict_configure(self, data):
+        if 'bind' in data:
+            if isinstance(data['bind'], (tuple, list)):
+                for addr in data['bind']:
+                    self.bind(addr)
+            else:
+                self.bind(data['bind'])
+        if 'connect' in data:
+            if isinstance(data['connect'], (tuple, list)):
+                for addr in data['connect']:
+                    self.connect(addr)
+            else:
+                self.connect(data['connect'])
+        # we have no identity as swap as they will be dropped
+        if 'hwm' in data:
+            self.setsockopt(zmq.HWM, int(data['hwm']))
+        if 'affinity' in data:
+            self.setsockopt(zmq.AFFINITY, int(data['affinity']))
+        if 'backlog' in data:
+            self.setsockopt(zmq.BACKLOG, int(data['backlog']))
+        if 'linger' in data:
+            self.setsockopt(zmq.LINGER, int(data['linger']))
+        if 'sndbuf' in data:
+            self.setsockopt(zmq.SNDBUF, int(data['sndbuf']))
+        if 'rcvbuf' in data:
+            self.setsockopt(zmq.RCVBUF, int(data['rcvbuf']))
+        # TODO(tailhook) add other options
+
+
 def send_data(sock, data, address=None):
     if address is None:
         _rep = []
@@ -80,7 +111,7 @@ def rep_listener(sock, callback):
 
 
 def rep_socket(callback):
-    sock = context().socket(zmq.XREP)
+    sock = Socket(context(), zmq.XREP)
     core.gethub().do_spawnservice(partial(rep_listener, sock, callback))
     return sock
 
@@ -108,7 +139,7 @@ def sub_listener(sock, callback):
 
 
 def sub_socket(callback):
-    sock = context().socket(zmq.SUB)
+    sock = Socket(context(), zmq.SUB)
     core.gethub().do_spawnservice(partial(sub_listener, sock, callback))
     return sock
 
@@ -118,7 +149,7 @@ def pub_socket():
 
 
 def pull_socket(callback):
-    sock = context().socket(zmq.PULL)
+    sock = Socket(context(), zmq.PULL)
     core.gethub().do_spawnservice(partial(sub_listener, sock, callback))
     return sock
 
@@ -136,7 +167,7 @@ class ReqChannel(channel.MuxReqChannel):
     def __init__(self):
         super().__init__()
         self.init_id()
-        self._sock = context().socket(zmq.XREQ)
+        self._sock = Socket(context(), zmq.XREQ)
         self._start()
 
     def init_id(self):
@@ -155,6 +186,9 @@ class ReqChannel(channel.MuxReqChannel):
 
     def connect(self, value):
         self._sock.connect(value)
+
+    def dict_configure(self, dic):
+        self._sock.dict_configure(dic)
 
     def sender(self):
         wait_write = core.gethub().do_write
@@ -180,13 +214,16 @@ class OutputChannel(object):
 
     def __init__(self):
         super().__init__()
-        self._sock = context().socket(self.zmq_kind)
+        self._sock = Socket(context(), self.zmq_kind)
 
     def bind(self, value):
         self._sock.bind(value)
 
     def connect(self, value):
         self._sock.connect(value)
+
+    def dict_configure(self, dic):
+        self._sock.dict_configure(dic)
 
 
 class PubChannel(OutputChannel):
