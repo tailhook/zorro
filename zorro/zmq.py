@@ -3,6 +3,7 @@ import random
 import struct
 import errno
 import time
+import pickle
 from functools import partial
 
 import zmq
@@ -262,3 +263,102 @@ def context():
     if ctx is None:
         return plug(hub)
     return ctx
+
+
+class MethodCallError(Exception):
+    pass
+
+
+class MethodException(Exception):
+    pass
+
+
+class Method(object):
+    __slots__ = ('owner', 'name')
+
+    def __init__(self, owner, name):
+        self.owner = owner
+        self.name = name
+
+    def __call__(self, *args):
+        o = self.owner
+        lst = [self.name]
+        lst.extend(map(o.dumps, args))
+        res = o.channel.request(lst).get()
+        if res[0] == b'_result':
+            return self.owner.loads(res[1])
+        elif res[0] == b'_error':
+            raise MethodCallError(res[1].decode('ascii'))
+        elif res[0] == b'_exception':
+            raise MethodException(res[1].decode('utf-8'))
+        else:
+            raise MethodException("Wrong reply")
+
+
+class Requester(object):
+    loads = pickle.loads
+    dumps = pickle.dumps
+
+    def __init__(self, channel, prefix=''):
+        self.channel = channel
+        if isinstance(prefix, str):
+            self.prefix = prefix.encode('ascii')
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError("Method name can't start with underscore")
+        fullname = self.prefix + name.encode('ascii')
+        return Method(self, fullname)
+
+
+class Responder(object):
+    loads = pickle.loads
+    dumps = pickle.dumps
+
+    def __call__(self, name, *args):
+        name = name.decode('ascii')
+        if name.startswith('_'):
+            return (b'_error', b'bad_name')
+        meth = getattr(self, name, None)
+        if meth is None or not callable(meth):
+            return (b'_error', b'no_method')
+        try:
+            args = tuple(map(self.loads, args))
+        except Exception as e:
+            return (b'_error', b'unpacking_error')
+        try:
+            result = meth(*args)
+        except Exception as e:
+            # TODO(tailhook) log exception
+            return (b'_exception', repr(e))
+        try:
+            result = self.dumps(result)
+        except Exception as e:
+            return (b'_error', b'packing_error')
+        return (b'_result', result)
+
+
+class Dispatcher(dict):
+
+    def __init__(self, default, **kw):
+        if isinstance(default, dict):
+            super().__init__(default, **kw)
+        else:
+            self[None] = default
+            super().__init__(**kw)
+
+    def __call__(self, name, *args):
+        parts = name.rsplit(b'.', 1)
+        if len(parts) > 1:
+            oname, name = parts
+            oname = oname.decode('ascii')
+        else:
+            oname = None
+            name = parts[0]
+        obj = self.get(oname)
+        if obj is None:
+            return (b'_error', b'wrong_prefix')
+        else:
+            return obj(name, *args)
+
+

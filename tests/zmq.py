@@ -1,6 +1,7 @@
 from .base import Test, interactive, passive
 import zmq
 import time
+import pickle
 
 class TestZeromq(Test):
 
@@ -215,6 +216,85 @@ class TestPools(Test):
             b'6_end',
             ])
 
+
+class TestRPC(Test):
+
+    def setup_svc(self):
+
+        class Responder(self.z.zmq.Responder):
+
+            def __init__(self, name):
+                self.name = name
+
+            def hello(self):
+                return 'my name is ' + self.name
+
+            def hi(self, name):
+                return 'hello, {} from {}'.format(name, self.name)
+
+        sock = self.z.zmq.rep_socket(self.z.zmq.Dispatcher(
+            Responder('Ghost'),
+            jim=Responder('Jim'),
+            pit=Responder('Pit'),
+            ))
+        sock.connect('ipc:///tmp/zorro-pool-test')
+
+
+    @interactive(setup_svc)
+    def testService(self):
+        ctx = zmq.Context(1)
+        sock = ctx.socket(zmq.REQ)
+        sock.bind('ipc:///tmp/zorro-pool-test')
+        sock.send_multipart([b'jim.hello'])
+        self.assertEqual(sock.recv_multipart(),
+            [b'_result', pickle.dumps('my name is Jim')])
+        sock.send_multipart([b'pit.hello'])
+        self.assertEqual(sock.recv_multipart(),
+            [b'_result', pickle.dumps('my name is Pit')])
+        sock.send_multipart([b'jim.hi', pickle.dumps('John')])
+        self.assertEqual(sock.recv_multipart(),
+            [b'_result', pickle.dumps('hello, John from Jim')])
+        sock.send_multipart([b'hi', pickle.dumps('Casper')])
+        self.assertEqual(sock.recv_multipart(),
+            [b'_result', pickle.dumps('hello, Casper from Ghost')])
+        sock.send_multipart([b'test', pickle.dumps('Casper')])
+        self.assertEqual(sock.recv_multipart(), [b'_error', b'no_method'])
+        sock.send_multipart([b'hello', pickle.dumps(1)])
+        self.assertEqual(sock.recv_multipart(), [b'_exception',
+            b"TypeError('hello() takes exactly"
+            b" 1 positional argument (2 given)',)"])
+        sock.send_multipart([b'_hi', pickle.dumps(b'Casper')])
+        self.assertEqual(sock.recv_multipart(), [b'_error', b'bad_name'])
+
+    def setup_req(self):
+        sock = self.z.zmq.req_socket()
+        sock.connect('ipc:///tmp/zorro-pool-test')
+        req = self.z.zmq.Requester(sock)
+        req2 = self.z.zmq.Requester(sock, 'jim.')
+        self.assertEqual('hi', req.hello('Test'))
+        self.assertEqual('hihi', req2.hello('John'))
+        with self.assertRaises(self.z.zmq.MethodCallError):
+            req2.hello()
+        with self.assertRaises(self.z.zmq.MethodException):
+            req2.hello_world()
+
+
+    @interactive(setup_req)
+    def testRequests(self):
+        ctx = zmq.Context(1)
+        sock = ctx.socket(zmq.REP)
+        sock.bind('ipc:///tmp/zorro-pool-test')
+        self.assertEqual(sock.recv_multipart(),
+            [b'hello', pickle.dumps('Test')])
+        sock.send_multipart([b'_result', pickle.dumps('hi')])
+        self.assertEqual(sock.recv_multipart(),
+            [b'jim.hello', pickle.dumps('John')])
+        sock.send_multipart([b'_result', pickle.dumps('hihi')])
+        self.assertEqual(sock.recv_multipart(), [b'jim.hello'])
+        sock.send_multipart([b'_error', b'bad_method'])
+        self.assertEqual(sock.recv_multipart(), [b'jim.hello_world'])
+        sock.send_multipart([b'_exception',
+            repr(ValueError('test')).encode('ascii')])
 
 if __name__ == '__main__':
     import unittest
