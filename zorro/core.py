@@ -52,17 +52,33 @@ class Zorrolet(greenlet.greenlet):
                 return '<Z{:x} {}>'.format(id(self),
                     getattr(r, '__name__', r))
 
+
+class EpollWrapper(object):
+    delegate_methods = ('register', 'unregister', 'modify', 'close')
+
+    def __init__(self, poll):
+        self._poll = poll
+        for name in self.delegate_methods:
+            setattr(self, name, getattr(poll, name))
+
+    def poll(self, timeout=-1, maxevents=-1):
+        if timeout > 0:
+            return self._poll.poll(timeout//1000, maxevents)
+        else:
+            return self._poll.poll(timeout, maxevents)
+
+
 class Hub(object):
     def __init__(self):
         self._queue = orderedset()
         try:
-            self._poller = select.epoll()
+            self._poller = EpollWrapper(select.epoll())
             self.POLLIN = select.EPOLLIN
             self.POLLOUT = select.EPOLLOUT
         except AttributeError:
             self._poller = select.poll()
             self.POLLIN = select.POLLIN
-            self.POLLOUT = select.EPOLLOUT
+            self.POLLOUT = select.POLLOUT
             self._log.info("Using poller %r", self._poller)
         self._filedes = methodcaller('fileno')
         self._timeouts = priorityqueue()
@@ -190,10 +206,10 @@ class Hub(object):
     def io(self):
         timeo = self._timeouts.min()
         if timeo is not None:
-            timeo = max(timeo - time.time(), 0)
+            timeo = int(round(max(timeo - time.time(), 0)*1000))
         else:
             timeo = -1
-        items = self._poller.poll(timeout=timeo*1000)
+        items = self._poller.poll(timeo)
         for fd, ev in items:
             if ev & self.POLLOUT:
                 if fd in self._out_sockets:
