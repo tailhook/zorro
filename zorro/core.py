@@ -193,7 +193,7 @@ class Hub(object):
             timeo = max(timeo - time.time(), 0)
         else:
             timeo = -1
-        items = self._poller.poll(timeout=timeo)
+        items = self._poller.poll(timeout=timeo*1000)
         for fd, ev in items:
             if ev & self.POLLOUT:
                 if fd in self._out_sockets:
