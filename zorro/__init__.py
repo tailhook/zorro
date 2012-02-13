@@ -1,5 +1,4 @@
 from .core import Hub, gethub, Future, Condition, Lock
-from .net import bufferedsocket
 from contextlib import contextmanager
 from functools import wraps
 
