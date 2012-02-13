@@ -5,6 +5,7 @@ import threading
 import select
 import weakref
 import logging
+import errno
 from collections import deque, defaultdict
 from functools import partial
 from operator import methodcaller
@@ -209,18 +210,25 @@ class Hub(object):
             timeo = int(round(max(timeo - time.time(), 0)*1000))
         else:
             timeo = -1
-        items = self._poller.poll(timeo)
-        for fd, ev in items:
-            if ev & self.POLLOUT:
-                if fd in self._out_sockets:
-                    task = self._out_sockets[fd][0]
-                    self.queue_task(task, 'read')
-            if ev & self.POLLIN:
-                if fd in self._in_sockets:
-                    task = self._in_sockets[fd][0]
-                    self.queue_task(task, 'write')
-                elif fd == self._control_fd:
-                    self._control[0].recv(1024) # throw it, just need wake up
+        try:
+            items = self._poller.poll(timeo)
+        except IOError as e:
+            if e.errno in (errno.EINTR, errno.EAGAIN):
+                return
+            raise
+        else:
+            for fd, ev in items:
+                if ev & self.POLLOUT:
+                    if fd in self._out_sockets:
+                        task = self._out_sockets[fd][0]
+                        self.queue_task(task, 'read')
+                if ev & self.POLLIN:
+                    if fd in self._in_sockets:
+                        task = self._in_sockets[fd][0]
+                        self.queue_task(task, 'write')
+                    elif fd == self._control_fd:
+                        self._control[0].recv(1024)
+                        # throw it, just need wake up
 
     def timeouts(self):
         if not self._timeouts:
