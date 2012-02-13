@@ -100,6 +100,11 @@ class PipelinedReqChannel(BaseChannel):
         self._cond.notify()
         return val
 
+    def push(self, input):
+        """For requests which do not need an answer"""
+        self._pending.append(input)
+        self._cond.notify()
+
 
 class MuxReqChannel(BaseChannel):
     def __init__(self):
