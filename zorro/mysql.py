@@ -167,7 +167,7 @@ def _read_bindatetime(buf, pos):
 
 
 FIELD_MAPPING = {
-    0x00: Decimal,
+    0x00: lambda a: Decimal(str(a, 'utf-8')),
     0x01: int,
     0x02: int,
     0x03: int,
@@ -181,7 +181,7 @@ FIELD_MAPPING = {
     0x0c: lambda a: datetime.strptime(str(a, 'ascii'), '%Y-%m-%d %H:%M:%S'),
     0x0d: int,
     0x0f: lambda a: str(a, 'utf-8'),
-    0xf6: Decimal,
+    0xf6: lambda a: str(a, 'utf-8'),
     0xf7: lambda a: str(a, 'utf-8'),
     0xf8: lambda a: set(s.decode('utf-8').split(',')),
     0xf9: bytes,
