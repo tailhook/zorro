@@ -206,6 +206,7 @@ FIELD_BIN_READERS = { # type, unsigned property
     (0x0b, False): _read_bintime,
     (0x0c, False): _read_bindatetime,
     (0x0f, False): _read_lcstr,
+    (0xf6, False): _read_lcstr,  # new decimal
     (0xf7, False): _read_lcstr,
     (0xf9, False): _read_lcbytes,
     (0xfa, False): _read_lcbytes,
