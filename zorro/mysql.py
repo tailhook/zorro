@@ -771,6 +771,8 @@ class Mysql(object):
         else:
             buf += b'\x00'
         for f, a in zip(stmt.params, args):
+            if a is None:
+                continue  # masked out
             if not isinstance(a, bytes):
                 a = str(a).encode('utf-8')
             _write_lcbytes(buf, a)
@@ -803,6 +805,8 @@ class Mysql(object):
         else:
             buf += b'\x00'
         for a in args:
+            if a is None:
+                continue  # masked out
             if not isinstance(a, bytes):
                 a = str(a).encode('utf-8')
             _write_lcbytes(buf, a)

@@ -51,6 +51,10 @@ class Simple(Mysql):
         self.assertEqual(set(self.m.query_prepared(
             'select * from test where id < ?', 30)),
             set([(12, "11"), (22, "222")]))
+        self.assertEqual(self.m.execute_prepared(
+            'update test set val = ? where id < ?', None, 30), (0, 2))
+        self.assertEqual(set(self.m.query_prepared('select * from test')),
+            set([(12, None), (22, None), (32, "3333")]))
 
     @passive
     def test_error(self):
