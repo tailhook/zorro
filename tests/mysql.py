@@ -121,6 +121,14 @@ class TestTypes(Mysql):
             ])
 
     @passive
+    def test_text(self):
+        self.exact_test('VARCHAR(1024)', [
+            "hello",
+            "t"*520,
+            ])
+
+
+    @passive
     def test_char(self):
         self.exact_test('CHAR(10)', [
             "hello",

@@ -125,12 +125,14 @@ def _write_lcbytes(buf, data):
     if ln <= 250:
         buf.append(ln)
     elif ln <= 0xFFFF:
-        buf += struct.pack('<H', ln)
+        buf += b'\xfc' + struct.pack('<H', ln)
     elif ln <= 0xFFFFFF:
+        buf.append(b'\xfd')
         buf.append(ln & 0xFF)
         buf.append((ln >> 8) & 0xFF)
         buf.append(ln >> 16)
     else:
+        buf.append(b'\xfe')
         buf += struct.pack('<Q', ln)
     buf += data
 
