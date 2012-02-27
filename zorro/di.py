@@ -86,15 +86,10 @@ class DependencyInjector(object):
     def inject(self, inst, **renames):
         """Injects dependencies and propagates dependency injector"""
         if renames:
-            di = self.__class__()
-            mypro = self._provides
-            pro = di._provides
-            pro.update(mypro)
-            for name, alias in renames.items():
-                pro[name] = mypro[alias]
+            di = self.clone(**renames)
         else:
             di = self
-            pro = di._provides
+        pro = di._provides
         inst.__zorro_di__ = di
         deps = getattr(inst, '__zorro_depends__', None)
         if deps:
@@ -166,6 +161,15 @@ class DependencyInjector(object):
 
     def __getitem__(self, name):
         return self._provides[name]
+
+    def clone(self, **renames):
+        di = self.__class__()
+        mypro = self._provides
+        pro = di._provides
+        pro.update(mypro)
+        for name, alias in renames.items():
+            pro[name] = mypro[alias]
+        return di
 
 
 def dependencies(cls):
