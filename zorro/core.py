@@ -9,6 +9,7 @@ import errno
 from collections import deque, defaultdict
 from functools import partial
 from operator import methodcaller
+from math import ceil
 
 from .util import priorityqueue, orderedset, socket_pair, marker_object
 
@@ -64,7 +65,7 @@ class EpollWrapper(object):
 
     def poll(self, timeout=-1, maxevents=-1):
         if timeout > 0:
-            return self._poll.poll(timeout//1000, maxevents)
+            return self._poll.poll(timeout/1000, maxevents)
         else:
             return self._poll.poll(timeout, maxevents)
 
@@ -207,7 +208,7 @@ class Hub(object):
     def io(self):
         timeo = self._timeouts.min()
         if timeo is not None:
-            timeo = int(round(max(timeo - time.time(), 0)*1000))
+            timeo = int(ceil(max(timeo - time.time(), 0)*1000))
         else:
             timeo = -1
         try:
