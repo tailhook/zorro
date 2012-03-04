@@ -1,7 +1,10 @@
 from .core import gethub, Lock
 from . import channel
+from .util import setcloexec
+
 import socket
 import errno
+
 
 convert = {
     str: lambda a: a.encode('utf-8'),
@@ -10,6 +13,7 @@ convert = {
     int: lambda a: bytes(str(a), 'utf-8'),
     float: lambda a: bytes(repr(a), 'utf-8'),
     }
+
 
 def encode_command(buf, parts):
     add = buf.extend
@@ -35,6 +39,7 @@ class RedisChannel(channel.PipelinedReqChannel):
         else:
             self._sock = socket.socket(socket.AF_INET,
                 socket.SOCK_STREAM, socket.IPPROTO_TCP)
+        setcloexec(self._sock)
         self._sock.setblocking(0)
         try:
             if unixsock:

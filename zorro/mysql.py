@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from .core import gethub, Lock, Future
 from . import channel
-from .util import marker_object
+from .util import marker_object, setcloexec
 
 
 PREPARED_STMT = marker_object("PREPARED_STMT")
@@ -479,6 +479,7 @@ class Channel(channel.PipelinedReqChannel):
             sock = socket.socket(socket.AF_INET,
                 socket.SOCK_STREAM, socket.IPPROTO_TCP)
             addr = (host, port)
+        setcloexec(sock)
         self._sock = sock
         self._sock.setblocking(0)
         fut = Future()

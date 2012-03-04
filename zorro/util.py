@@ -1,3 +1,4 @@
+import fcntl
 from heapq import heappush, heappop
 from collections import deque
 
@@ -100,3 +101,8 @@ class marker_object(object):
 
     def __repr__(self):
         return '<{}>'.format(self.name)
+
+
+def setcloexec(sock):
+    flags = fcntl.fcntl(sock, fcntl.F_GETFD)
+    fcntl.fcntl(sock, fcntl.F_SETFD, flags | fcntl.FD_CLOEXEC)

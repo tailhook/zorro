@@ -1,10 +1,13 @@
 from ..core import gethub, Lock
 from .. import channel
 from . import bson
+from ..util import setcloexec
+
 import socket
 import errno
 import struct
 import os.path
+
 
 OP_REPLY = 1
 OP_MSG = 1000
@@ -36,6 +39,7 @@ class Channel(channel.MuxReqChannel):
             sock = socket.socket(socket.AF_INET,
                 socket.SOCK_STREAM, socket.IPPROTO_TCP)
             addr = (host, port)
+        setcloexec(sock)
         self._sock = sock
         self._sock.setblocking(0)
         try:
