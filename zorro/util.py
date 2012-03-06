@@ -31,16 +31,18 @@ class priorityqueue(object):
 
     def __init__(self):
         self.heap = []
+        self.counter = 0
 
     def add(self, pri, task):
-        item = [pri, task]
+        self.counter += 1
+        item = [pri, self.counter, task]
         heappush(self.heap, item)
         def remover(*a):
-            item[1] = None
+            item[2] = None
         return remover
 
     def min(self):
-        while self.heap and self.heap[0][1] is None:
+        while self.heap and self.heap[0][2] is None:
             heappop(self.heap)
         if self.heap:
             return self.heap[0][0]
@@ -49,7 +51,7 @@ class priorityqueue(object):
     def pop(self, value):
         val = self.min()
         if val is not None and val <= value:
-            return self.heap[0][1]
+            return self.heap[0][2]
         return None
 
     def __bool__(self):
