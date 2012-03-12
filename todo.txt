@@ -6,29 +6,28 @@ Mongodb:
 Redis:
  * implement memcached-style sharding
 
-Mysql:
- * implement error reporting
- * implement date types
- * add tests for all data types for binary and text forms
- * test and fix handling of nulls in arguments and returns
-
 Dependency Injection:
  * establish good rules of propagating dependency changes
  * implement lazy dependency creation
  * implement `__contains__` check
 
 Zerogw:
- * better request object: cookie handling
+ * fix 403 for some cases where 404 is more apropriate
+ * rework dispatching/delegation model
 
-Protocols:
- * HTTP client
- * collectd (unixsocket and/or UDP and/or zeromq)
- * Implement some RPC support on top of zeromq
+Collectd:
+ * Direct UDP protocol support
+ * Zeromq protocol support
+
+HTTP:
+ * Chunked transfer encoding
+ * Gzip content encoding
+ * Multiple-channel http client
+ * Asynchronous DNS
 
 Core:
  * implement pluggable logging
- * limit number of simultaneous tasks for pull, sub and rep sockets
- * think about making timeouts to not leave broken tasks forever in memory
+ * implement statistics hooks
  * implement hub with debugging log
  * add `multithreaded` hub option
  * think about waiting multiple events in single greenlet
