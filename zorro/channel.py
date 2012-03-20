@@ -1,5 +1,10 @@
-from . import Future, Condition, gethub
 from collections import deque
+import logging
+
+from . import Future, Condition, gethub
+
+
+log = logging.getLogger(__name__)
 
 
 class PipeError(Exception):
@@ -28,6 +33,8 @@ class BaseChannel(object):
             self.sender()
         except (EOFError, ShutdownException):
             pass
+        except Exception:
+            log.exception("Error in %r's sender", self)
         finally:
             if self._alive:
                 self._alive = False
@@ -38,6 +45,8 @@ class BaseChannel(object):
             self.receiver()
         except (EOFError, ShutdownException):
             pass
+        except Exception:
+            log.exception("Error in %r's receiver", self)
         finally:
             if self._alive:
                 self._alive = False
