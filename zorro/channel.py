@@ -1,6 +1,8 @@
 from collections import deque
 import logging
 
+from greenlet import GreenletExit
+
 from . import Future, Condition, gethub
 
 
@@ -31,7 +33,7 @@ class BaseChannel(object):
     def _sender_wrapper(self):
         try:
             self.sender()
-        except (EOFError, ShutdownException):
+        except (EOFError, ShutdownException, GreenletExit):
             pass
         except Exception:
             log.exception("Error in %r's sender", self)
@@ -43,7 +45,7 @@ class BaseChannel(object):
     def _receiver_wrapper(self):
         try:
             self.receiver()
-        except (EOFError, ShutdownException):
+        except (EOFError, ShutdownException, GreenletExit):
             pass
         except Exception:
             log.exception("Error in %r's receiver", self)
