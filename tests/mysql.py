@@ -38,6 +38,15 @@ class Simple(Mysql):
             {'id': 10, 'val': "11"})
 
     @passive
+    def test_nulls(self):
+        self.m.execute('drop table if exists test')
+        self.m.execute('create table test (id int)')
+        self.assertEqual(self.m.execute_prepared('insert into test values (?)'
+            + ',(?)'*24, *((1,)+(None,)*24)), (0, 25))
+        self.assertEqual(list(self.m.query('select * from test').tuples()),
+            [(1,)] + [(None,)]*24)
+
+    @passive
     def test_prepared(self):
         self.m.execute('drop table if exists test')
         self.m.execute('create table test (id int, val varchar(10))')

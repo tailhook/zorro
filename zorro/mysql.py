@@ -767,7 +767,7 @@ class Mysql(object):
             byte = 0
             for j in range(i, min(i+8, la)):
                 if args[j] is None:
-                    byte |= 1 << j
+                    byte |= 1 << (j & 7)
             buf.append(byte)
         if not stmt.bound:
             stmt.write_binding(buf)
