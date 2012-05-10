@@ -72,6 +72,7 @@ class EpollWrapper(object):
 
 class Hub(object):
     def __init__(self):
+        self._log = logging.getLogger('zorro.hub.{:x}'.format(id(self)))
         self._queue = orderedset()
         try:
             self._poller = EpollWrapper(select.epoll())
@@ -93,7 +94,6 @@ class Hub(object):
         self._services = weakref.WeakKeyDictionary()
         self._tasks = weakref.WeakKeyDictionary()
         self._helpers = weakref.WeakKeyDictionary()
-        self._log = logging.getLogger('zorro.hub.{:x}'.format(id(self)))
 
     # global methods
 
