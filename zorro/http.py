@@ -121,7 +121,7 @@ class RequestChannel(channel.PipelinedReqChannel):
             clen = int(headers.get('Content-Length', '0'))
             if clen < 0:
                 raise EOFError("Wrong content length")
-            while pos[0] + clen < len(buf):
+            while pos[0] + clen > len(buf):
                 readmore()
             return status, headers, buf[pos[0]:pos[0]+clen]
 
