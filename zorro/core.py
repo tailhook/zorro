@@ -25,6 +25,8 @@ __all__ = [
 FUTURE_EXCEPTION = marker_object('FUTURE_EXCEPTION')
 FUTURE_PENDING = marker_object('FUTURE_PENDING')
 
+os_errors = (IOError, OSError)
+
 class Zorrolet(greenlet.greenlet):
     __slots__ = ('hub', 'cleanup')
 
@@ -213,7 +215,7 @@ class Hub(object):
             timeo = -1
         try:
             items = self._poller.poll(timeo)
-        except IOError as e:
+        except os_errors as e:
             if e.errno in (errno.EINTR, errno.EAGAIN):
                 return
             raise

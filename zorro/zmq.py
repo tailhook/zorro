@@ -253,6 +253,7 @@ def plug(hub, io_threads=DEFAULT_IO_THREADS):
     ctx = hub.zmq_context = zmq.Context(io_threads)
     hub.change_poller(zmq.Poller, filedes=_get_fd,
         POLLIN=zmq.POLLIN, POLLOUT=zmq.POLLOUT)
+    core.os_errors += (ZMQError,)
     hub.log_plugged(ctx, name='zmq_context')
     return ctx
 
