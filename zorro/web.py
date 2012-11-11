@@ -1,4 +1,11 @@
+import abc
+import logging
+from inspect import signature, Parameter
+from urllib.parse import urlparse, parse_qsl
+
 from .util import cached_property
+
+log = logging.getLogger(__name__)
 
 
 class LegacyMultiDict(object):
@@ -107,7 +114,46 @@ class NotFound(WebException):
                 )
 
 
+class PathResolver(object):
+
+    def __init__(self, request):
+        self.request = request
+        self.parts = request.parsed_uri.path.strip('/').split('/')
+        self.path_iter = self.positional_args = iter(self.parts)
+        self.keyword_args = self.request.form_arguments.copy()
+
+    def resolve(self, root):
+        node = root
+        for i in self.path_iter:
+            node = node.resolve_local(i)
+            if hasattr(node, '_zweb_page'):
+                return node._zweb_page(node.__self__, self)
+            elif hasattr(node, '_zweb_resource'):
+                node = node._zweb_resource(node.__self__, self)
+        if hasattr(node, 'index') and hasattr(node.index, '_zweb_page'):
+            return node.index._zweb_page(node, self)
+        return node()
+
+
+class InternalRedirect(Exception, metaclass=abc.ABCMeta):
+
+    @abc.abstractmethod
+    def update_request(self, request):
+        pass
+
+
+class PathRewrite(InternalRedirect):
+
+    def __init__(self, new_path):
+        self.new_path = new_path.encode('ascii')
+
+    def update_request(self, request):
+        request.uri = self.new_path
+        del request.parsed_uri
+
+
 class Resource(object):
+    resolver_class = PathResolver
 
 
     def resolve_local(self, name):
@@ -116,7 +162,9 @@ class Resource(object):
         target = getattr(self, name, None)
         if target is None:
             raise NotFound()
-        if getattr(target, '_public_decorator', None):
+        if getattr(target, '_zweb_page', None):
+            return target
+        if getattr(target, '_zweb_resource', None):
             return target
         raise NotFound()
 
@@ -127,10 +175,20 @@ class Site(object):
         self.request_class = request_class
         self.resources = resources
 
+    def _resolve(self, request):
+        for i in self.resources:
+            res = i.resolver_class(request)
+            try:
+                return res.resolve(i)
+            except NotFound:
+                continue
+        else:
+            raise NotFound()
+
     def _safe_dispatch(self, request):
         while True:
             try:
-                result = self.dispatch(request)
+                result = self._resolve(request)
             except InternalRedirect as e:
                 e.update_request(request)
                 continue
@@ -157,7 +215,115 @@ class Site(object):
         else:
             return result
 
-
-def public(fun):
-    fun._public_decorator = lambda self, *a, **kw: fun(self)
+def resource(fun):
+    """Decorator to denote a method which returns resource to be traversed"""
+    def decor(self, dispatcher):
+        sig = signature(fun)
+        pos = []
+        kw = {}
+        for i, (name, param) in enumerate(sig.parameters.items()):
+            if i == 0:
+                continue  # always self
+            if param.kind == Parameter.POSITIONAL_ONLY:
+                try:
+                    pos.append(next(dispatcher.positional_args))
+                except StopIteration:
+                    if param.default is Parameter.empty:
+                        log.info("No positional argument %r for %r", name, fun)
+                        raise NotFound()
+            elif param.kind == Parameter.POSITIONAL_OR_KEYWORD:
+                try:
+                    pos.append(next(dispatcher.positional_args))
+                except StopIteration:
+                    try:
+                        kw[name] = dispatcher.keyword_args.pop(name)
+                    except KeyError:
+                        if param.default is Parameter.empty:
+                            log.info("No argument %r for %r", name, fun)
+                            raise NotFound()
+            elif param.kind == Parameter.VAR_POSITIONAL:
+                pos.extend(dispatcher.positional_args)
+            elif param.kind == Parameter.KEYWORD_ONLY:
+                try:
+                    kw[name] = dispatcher.keyword_args.pop(name)
+                except KeyError:
+                    if param.default is Parameter.empty:
+                        log.info("No keyword argument %r for %r", name, fun)
+                        raise NotFound()
+            elif param.kind == Parameter.VAR_KEYWORD:
+                kw.update(dispatcher.keyword_args)
+                dispatcher.keyword_args.clear()
+            else:
+                raise NotImplementedError(param.kind)
+        try:
+            bound = sig.bind(self, *pos, **kw)
+        except TypeError:
+            raise NotFound()
+        for k, v in bound.arguments.items():
+            an = sig.parameters[k].annotation
+            if an is not Parameter.empty:
+                try:
+                    bound.arguments[k] = an(v)
+                except (ValueError, TypeError):
+                    raise NotFound()
+        return fun(*bound.args, **bound.kwargs)
+    fun._zweb_resource = decor
     return fun
+
+
+def page(fun):
+    """Decorator to denote a method which returns some result to the user"""
+    def decor(self, dispatcher):
+        sig = signature(fun)
+        try:
+            bound = sig.bind(self,
+                *dispatcher.positional_args,
+                **dispatcher.keyword_args)
+        except TypeError as e:
+            raise NotFound()
+        for k, v in bound.arguments.items():
+            an = sig.parameters[k].annotation
+            if an is not Parameter.empty:
+                try:
+                    bound.arguments[k] = an(v)
+                except (ValueError, TypeError):
+                    raise NotFound()
+        return fun(*bound.args, **bound.kwargs)
+    fun._zweb_page = decor
+    return fun
+
+
+def postprocessor(fun):
+    if not hasattr(fun, '_post_processors'):
+        fun._post_processors = []
+    def wrapper(proc):
+        fun._post_processors.append(proc)
+        return wrapper
+    return fun
+
+"""
+def arguments(fun):
+    lines = []
+    call = []
+    params = signature(fun).parameters
+    for name, param in params.items()
+        if param.kind = Parameter.VAR_KEYWORD:
+            lines.append('{} = dict(resolver.keyword_args)')
+            break
+    for name, param in params.items():
+        if ann.kind == VAR_POSITIONAL:
+            lines.append('{} = list(resolver.positional_args)')
+            call.append('*' + name)
+            continue
+        elif ann.kind == VAR_KEYWORD:
+            # processed earlier
+            call.append('**' + name)
+            continue
+        ann = param.annotation
+        if ann is Parameter.empty
+            raise TypeError("No annotation for {!r}".format(name))
+        if ann.kind == Parameter.POSITIONAL_ONLY:
+            lines.append('')
+    fun._public_decorator = decor
+    return fun
+"""
