@@ -39,6 +39,10 @@ class TestWeb(unittest.TestCase):
         class Root(web.Resource):
 
             @web.page
+            def index(self):
+                return 'index'
+
+            @web.page
             def about(self):
                 return 'about'
 
@@ -73,6 +77,7 @@ class TestWeb(unittest.TestCase):
 
         site = web.Site(request_class=Request, resources=[Root()])
         s = lambda v: site._resolve(Request(v))
+        self.assertEqual(s(b'/'), 'index')
         self.assertEqual(s(b'/about'), 'about')
         self.assertEqual(s(b'/about/'), 'about')
         with self.assertRaises(web.NotFound):

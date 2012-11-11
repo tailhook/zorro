@@ -119,7 +119,11 @@ class PathResolver(object):
 
     def __init__(self, request):
         self.request = request
-        self.parts = request.parsed_uri.path.strip('/').split('/')
+        path = request.parsed_uri.path.strip('/')
+        if path:
+            self.parts = path.split('/')
+        else:
+            self.parts = ()
         self.path_iter = self.positional_args = iter(self.parts)
         self.keyword_args = self.request.form_arguments.copy()
 
