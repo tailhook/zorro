@@ -260,9 +260,10 @@ class TestRPC(Test):
         sock.send_multipart([b'test', pickle.dumps('Casper')])
         self.assertEqual(sock.recv_multipart(), [b'_error', b'no_method'])
         sock.send_multipart([b'hello', pickle.dumps(1)])
-        self.assertEqual(sock.recv_multipart(), [b'_exception',
-            b"TypeError('hello() takes exactly"
-            b" 1 positional argument (2 given)',)"])
+        exc = sock.recv_multipart()
+        self.assertEqual(exc[0], b'_exception')
+        # actual message differs between python versions
+        self.assertTrue(exc[1].startswith(b"TypeError('hello()"))
         sock.send_multipart([b'_hi', pickle.dumps(b'Casper')])
         self.assertEqual(sock.recv_multipart(), [b'_error', b'bad_name'])
 
