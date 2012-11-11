@@ -48,19 +48,19 @@ class SingleThread(Redis):
     @passive
     def test_keys(self):
         self.r.execute('DEL', 'test:big')
-        self.assertEquals(self.r.execute('SET', 'test:key1', 'value'), 'OK')
-        self.assertEquals(self.r.execute('SET', 'test:key2', 'value'), 'OK')
-        self.assertEquals(self.r.execute('KEYS', '*'),
-            [b'test:key1', b'test:key2'])
-        self.assertEquals(self.r.bulk([('MULTI',),
+        self.assertEqual(self.r.execute('SET', 'test:key1', 'value'), 'OK')
+        self.assertEqual(self.r.execute('SET', 'test:key2', 'value'), 'OK')
+        self.assertEqual(set(map(bytes, self.r.execute('KEYS', '*'))),
+            set([b'test:key1', b'test:key2']))
+        val = self.r.bulk([('MULTI',),
             ('GET', 'test:key1'),
             ('MGET', 'test:key1', 'test:key2'),
             ('KEYS', '*'),
-            ('EXEC',)]), [
-            b'value',
-            [b'value', b'value'],
-            [b'test:key1', b'test:key2'],
-            ])
+            ('EXEC',)])
+        self.assertEqual(val[0], b'value')
+        self.assertEqual(val[1], [b'value', b'value'])
+        self.assertSetEqual(set(map(bytes, val[2])),
+            set([b'test:key1', b'test:key2']))
         self.assertEquals(self.r.execute('DEL', 'test:key1'), 1)
         self.assertEquals(self.r.execute('DEL', 'test:key2'), 1)
 
