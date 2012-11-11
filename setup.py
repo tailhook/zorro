@@ -10,5 +10,5 @@ setup(name='Zorro',
         'Programming Language :: Python :: 3',
         'License :: OSI Approved :: MIT License',
         ],
-      packages=['zorro'],
+      packages=['zorro', 'zorro.mongodb'],
     )
