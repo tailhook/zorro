@@ -6,6 +6,7 @@ from urllib.parse import urlparse, parse_qsl
 from .util import cached_property
 
 log = logging.getLogger(__name__)
+sentinel = object()
 
 
 class LegacyMultiDict(object):
@@ -155,7 +156,6 @@ class PathRewrite(InternalRedirect):
 class Resource(object):
     resolver_class = PathResolver
 
-
     def resolve_local(self, name):
         if not name.isidentifier() or name.startswith('_'):
             raise NotFound()
@@ -215,115 +215,143 @@ class Site(object):
         else:
             return result
 
+
+def bind_args(fun, resolver, self):
+    sig = signature(fun)
+    providers = fun._zweb_providers
+    still_positional = True
+    pos = []
+    kw = {}
+    for i, (name, param) in enumerate(sig.parameters.items()):
+        if i == 0:
+            continue  # always self
+        prov = providers.get(param.annotation, None)
+        if prov is not None:
+            if(param.kind in (Parameter.POSITIONAL_ONLY,
+                              Parameter.POSITIONAL_OR_KEYWORD)
+               and still_positional):
+                # It's expected that combination of POSITIONAL_ONLY
+                # and not still_positional is impossible by signature
+                pos.append(prov(resolver))
+            else:
+                kw[name] = prov(resolver)
+            continue
+
+        if param.kind == Parameter.POSITIONAL_ONLY:
+            try:
+                pos.append(next(resolver.positional_args))
+            except StopIteration:
+                if param.default is Parameter.empty:
+                    log.info("No positional argument %r for %r", name, fun)
+                    raise NotFound()
+                else:
+                    still_positional = False
+        elif param.kind == Parameter.POSITIONAL_OR_KEYWORD:
+            if still_positional:
+                try:
+                    pos.append(next(resolver.positional_args))
+                except StopIteration:
+                    still_positional = False
+                    pass
+                else:
+                    continue
+            try:
+                kw[name] = resolver.keyword_args.pop(name)
+            except KeyError:
+                if param.default is Parameter.empty:
+                    log.info("No argument %r for %r", name, fun)
+                    raise NotFound()
+        elif param.kind == Parameter.VAR_POSITIONAL:
+            still_positional = False
+            pos.extend(resolver.positional_args)
+        elif param.kind == Parameter.KEYWORD_ONLY:
+            still_positional = False
+            try:
+                kw[name] = resolver.keyword_args.pop(name)
+            except KeyError:
+                if param.default is Parameter.empty:
+                    log.info("No keyword argument %r for %r", name, fun)
+                    raise NotFound()
+        elif param.kind == Parameter.VAR_KEYWORD:
+            still_positional = False
+            kw.update(resolver.keyword_args)
+            resolver.keyword_args.clear()
+        else:
+            raise NotImplementedError(param.kind)
+    try:
+        bound = sig.bind(self, *pos, **kw)
+    except TypeError as e:
+        print("POS", pos, kw)
+        log.info("Error binding signature", exc_info=e)
+        raise NotFound()
+    for k, v in bound.arguments.items():
+        an = sig.parameters[k].annotation
+        if an is not Parameter.empty and an not in providers:
+            try:
+                bound.arguments[k] = an(v)
+            except (ValueError, TypeError):
+                log.info("Error coercing %r into %r", v, an)
+                raise NotFound()
+    return bound
+
+
 def resource(fun):
     """Decorator to denote a method which returns resource to be traversed"""
-    def decor(self, dispatcher):
-        sig = signature(fun)
-        pos = []
-        kw = {}
-        for i, (name, param) in enumerate(sig.parameters.items()):
-            if i == 0:
-                continue  # always self
-            if param.kind == Parameter.POSITIONAL_ONLY:
-                try:
-                    pos.append(next(dispatcher.positional_args))
-                except StopIteration:
-                    if param.default is Parameter.empty:
-                        log.info("No positional argument %r for %r", name, fun)
-                        raise NotFound()
-            elif param.kind == Parameter.POSITIONAL_OR_KEYWORD:
-                try:
-                    pos.append(next(dispatcher.positional_args))
-                except StopIteration:
-                    try:
-                        kw[name] = dispatcher.keyword_args.pop(name)
-                    except KeyError:
-                        if param.default is Parameter.empty:
-                            log.info("No argument %r for %r", name, fun)
-                            raise NotFound()
-            elif param.kind == Parameter.VAR_POSITIONAL:
-                pos.extend(dispatcher.positional_args)
-            elif param.kind == Parameter.KEYWORD_ONLY:
-                try:
-                    kw[name] = dispatcher.keyword_args.pop(name)
-                except KeyError:
-                    if param.default is Parameter.empty:
-                        log.info("No keyword argument %r for %r", name, fun)
-                        raise NotFound()
-            elif param.kind == Parameter.VAR_KEYWORD:
-                kw.update(dispatcher.keyword_args)
-                dispatcher.keyword_args.clear()
-            else:
-                raise NotImplementedError(param.kind)
-        try:
-            bound = sig.bind(self, *pos, **kw)
-        except TypeError:
-            raise NotFound()
-        for k, v in bound.arguments.items():
-            an = sig.parameters[k].annotation
-            if an is not Parameter.empty:
-                try:
-                    bound.arguments[k] = an(v)
-                except (ValueError, TypeError):
-                    raise NotFound()
+    def decor(self, resolver):
+        bound = bind_args(fun, resolver, self)
         return fun(*bound.args, **bound.kwargs)
     fun._zweb_resource = decor
+    if not hasattr(fun, '_zweb_post'):
+        fun._zweb_post = []
+    if not hasattr(fun, '_zweb_providers'):
+        fun._zweb_providers = {}
     return fun
 
 
 def page(fun):
     """Decorator to denote a method which returns some result to the user"""
-    def decor(self, dispatcher):
-        sig = signature(fun)
-        try:
-            bound = sig.bind(self,
-                *dispatcher.positional_args,
-                **dispatcher.keyword_args)
-        except TypeError as e:
+    callee = getattr(fun, '_zweb_page', fun)
+    def decor(self, resolver):
+        bound = bind_args(fun, resolver, self)
+        if next(resolver.positional_args, sentinel) is not sentinel:
+            log.info("Too many positional args for %r", fun)
             raise NotFound()
-        for k, v in bound.arguments.items():
-            an = sig.parameters[k].annotation
-            if an is not Parameter.empty:
-                try:
-                    bound.arguments[k] = an(v)
-                except (ValueError, TypeError):
-                    raise NotFound()
-        return fun(*bound.args, **bound.kwargs)
+        if resolver.keyword_args:
+            log.info("Too many keyword args for %r", fun)
+            raise NotFound()
+        result = callee(*bound.args, **bound.kwargs)
+        for proc in fun._zweb_post:
+            result = proc(resolver, result)
+        return result
+    if not hasattr(fun, '_zweb_post'):
+        fun._zweb_post = []
+    if not hasattr(fun, '_zweb_providers'):
+        fun._zweb_providers = {}
     fun._zweb_page = decor
     return fun
 
 
 def postprocessor(fun):
-    if not hasattr(fun, '_post_processors'):
-        fun._post_processors = []
+    if not hasattr(fun, '_zweb_post'):
+        fun._zweb_post = []
     def wrapper(proc):
-        fun._post_processors.append(proc)
-        return wrapper
-    return fun
+        fun._zweb_post.append(proc)
+        return fun
+    return wrapper
 
-"""
-def arguments(fun):
-    lines = []
-    call = []
-    params = signature(fun).parameters
-    for name, param in params.items()
-        if param.kind = Parameter.VAR_KEYWORD:
-            lines.append('{} = dict(resolver.keyword_args)')
-            break
-    for name, param in params.items():
-        if ann.kind == VAR_POSITIONAL:
-            lines.append('{} = list(resolver.positional_args)')
-            call.append('*' + name)
-            continue
-        elif ann.kind == VAR_KEYWORD:
-            # processed earlier
-            call.append('**' + name)
-            continue
-        ann = param.annotation
-        if ann is Parameter.empty
-            raise TypeError("No annotation for {!r}".format(name))
-        if ann.kind == Parameter.POSITIONAL_ONLY:
-            lines.append('')
-    fun._public_decorator = decor
-    return fun
-"""
+
+def provider(fun, cls):
+    if not hasattr(fun, '_zweb_providers'):
+        fun._zweb_providers = {}
+    def wrapper(prov):
+        fun._zweb_providers[cls] = prov
+        return fun
+    return wrapper
+
+
+def wrapper(fun):
+    def decorator(wrap):
+        fun._zweb_page = wrap
+        return fun
+    return decorator
+

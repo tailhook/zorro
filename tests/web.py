@@ -111,23 +111,23 @@ class TestWeb(unittest.TestCase):
 
         def add_prefix(fun):
             @web.postprocessor(fun)
-            def processor(self, resolver, value):
+            def processor(resolver, value):
                 return 'prefix:[' + value + ']'
             return processor
 
-        def add_suffix(value):
+        def add_suffix(suffix):
             def decorator(fun):
                 @web.postprocessor(fun)
-                def processor(self, resolver, value):
-                    return '[' + value + ']:suffix'
+                def processor(resolver, value):
+                    return '[' + value + ']:' + suffix
                 return processor
             return decorator
 
         def add_user(fun):
             @web.provider(fun, User)
-            def provider(self, resolver):
-                uid = resolver.request.parsed_uri.args.pop('uid')
-                return user.uid
+            def provider(resolver):
+                uid = int(resolver.keyword_args.pop('uid'))
+                return User(uid)
             return provider
 
         last_latency = None
@@ -139,6 +139,7 @@ class TestWeb(unittest.TestCase):
                 result = fun(self, *args, **kw)
                 last_latency = time() - start
                 return result
+            return wrapper
 
 
         class Request(web.Request):
@@ -168,31 +169,47 @@ class TestWeb(unittest.TestCase):
                 return 'info(%d)' % uid
 
             @web.page
+            @add_user
             @timeit
             @add_prefix
             @add_suffix('suf')
             def banner(self, ad: int, user: User, *, position: str = "norm"):
-                return 'banner(ad:{}, uid:{}, position:{!r})'.format(
+                return 'banner(ad:{:d}, uid:{:d}, position:{})'.format(
                     ad, user.id, position)
+
+            @web.resource
+            @add_user
+            def forum(self, user:User):
+                return Forum(user)
+
+        class Forum(web.Resource):
+
+            def __init__(self, user):
+                self.user = user
+
+            @web.page
+            def index(self):
+                return "forum(user:{})".format(self.user.id)
 
 
         site = web.Site(request_class=Request, resources=[Root()])
         s = lambda v: site._resolve(Request(v))
-        self.assertEqual(s('/about'), 'prefix:[about]')
-        self.assertEqual(s('/profile?uid=3'), 'profile(3)')
-        self.assertEqual(s('/friend/2?uid=3'), 'profile(3).friend(2)')
-        self.assertEqual(s('/info/3'), 'prefix:info(3)')
-        self.assertEqual(s('/banner/3?uid=4'),
+        self.assertEqual(s(b'/about'), 'prefix:[about]')
+        self.assertEqual(s(b'/forum?uid=7'), 'forum(user:7)')
+        self.assertEqual(s(b'/profile?uid=3'), 'profile(3)')
+        self.assertEqual(s(b'/friend/2?uid=3'), 'profile(3).friend(2)')
+        self.assertEqual(s(b'/info/3'), 'prefix:[info(3)]')
+        #self.assertTrue(last_latency < 0.01)  # will also fail if it's None
+        #last_latency = None
+        self.assertEqual(s(b'/banner/3?uid=4'),
             'prefix:[[banner(ad:3, uid:4, position:norm)]:suf]')
         self.assertTrue(last_latency < 0.01)  # will also fail if it's None
-        self.assertEqual(s('/banner/?ad=2,uid=5'),
-            'prefix:[[banner(ad:2, uid:4, position:norm)]:suf]')
-        self.assertEqual(s('/banner/3?uid=4&position=abc'),
-            'prefix:[[banner(ad:3, uid:4, position:abc)]:suf]')
+        self.assertEqual(s(b'/banner/?ad=2&uid=5'),
+            'prefix:[[banner(ad:2, uid:5, position:norm)]:suf]')
+        self.assertEqual(s(b'/banner/3?uid=12&position=abc'),
+            'prefix:[[banner(ad:3, uid:12, position:abc)]:suf]')
 
 
 if __name__ == '__main__':
-    import logging
-    logging.basicConfig(level=logging.INFO)
     unittest.main()
 
