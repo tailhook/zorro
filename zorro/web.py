@@ -8,6 +8,10 @@ from .util import cached_property
 log = logging.getLogger(__name__)
 sentinel = object()
 
+_PAGE_METHOD = object()
+_RESOURCE_METHOD = object()
+_RESOURCE = object()
+
 
 class LegacyMultiDict(object):
     """Utilitary class which wrap dict to make it suitable for old utilities
@@ -131,13 +135,19 @@ class PathResolver(object):
         node = root
         for i in self.path_iter:
             node = node.resolve_local(i)
-            if hasattr(node, '_zweb_page'):
-                return node._zweb_page(node.__self__, self)
-            elif hasattr(node, '_zweb_resource'):
-                node = node._zweb_resource(node.__self__, self)
-        if hasattr(node, 'index') and hasattr(node.index, '_zweb_page'):
-            return node.index._zweb_page(node, self)
-        return node()
+            kind = getattr(node, '_zweb', None)
+            if kind is _PAGE_METHOD:
+                return _page_decorator(node, node.__self__, self)
+            elif kind is _RESOURCE_METHOD:
+                node = _resource_decorator(node, node.__self__, self)
+            elif kind is _RESOURCE:
+                pass
+            else:
+                raise NotFound()  # probably impossible but ...
+        if(hasattr(node, 'index')
+            and getattr(node.index, '_zweb', None) is _PAGE_METHOD):
+            return _page_decorator(node.index, node, self)
+        raise NotFound()
 
 
 class InternalRedirect(Exception, metaclass=abc.ABCMeta):
@@ -159,6 +169,7 @@ class PathRewrite(InternalRedirect):
 
 class Resource(object):
     resolver_class = PathResolver
+    _zweb = _RESOURCE
 
     def resolve_local(self, name):
         if not name.isidentifier() or name.startswith('_'):
@@ -166,9 +177,8 @@ class Resource(object):
         target = getattr(self, name, None)
         if target is None:
             raise NotFound()
-        if getattr(target, '_zweb_page', None):
-            return target
-        if getattr(target, '_zweb_resource', None):
+        kind = getattr(target, '_zweb', None)
+        if kind is not None:
             return target
         raise NotFound()
 
@@ -184,7 +194,7 @@ class Site(object):
             res = i.resolver_class(request)
             try:
                 return res.resolve(i)
-            except NotFound:
+            except NotFound as e:
                 continue
         else:
             raise NotFound()
@@ -220,15 +230,13 @@ class Site(object):
             return result
 
 
-def bind_args(fun, resolver, self):
+def _bind_args(fun, resolver):
     sig = signature(fun)
     providers = fun._zweb_providers
     still_positional = True
     pos = []
     kw = {}
     for i, (name, param) in enumerate(sig.parameters.items()):
-        if i == 0:
-            continue  # always self
         prov = providers.get(param.annotation, None)
         if prov is not None:
             if(param.kind in (Parameter.POSITIONAL_ONLY,
@@ -283,9 +291,8 @@ def bind_args(fun, resolver, self):
         else:
             raise NotImplementedError(param.kind)
     try:
-        bound = sig.bind(self, *pos, **kw)
+        bound = sig.bind(*pos, **kw)
     except TypeError as e:
-        print("POS", pos, kw)
         log.info("Error binding signature", exc_info=e)
         raise NotFound()
     for k, v in bound.arguments.items():
@@ -296,42 +303,52 @@ def bind_args(fun, resolver, self):
             except (ValueError, TypeError):
                 log.info("Error coercing %r into %r", v, an)
                 raise NotFound()
-    return bound
+    return bound.args, bound.kwargs
+
+
+def _resource_decorator(fun, self, resolver):
+    args, kwargs = fun._zweb_bind_args(fun, resolver)
+    return fun(*args, **kwargs)
 
 
 def resource(fun):
     """Decorator to denote a method which returns resource to be traversed"""
-    def decor(self, resolver):
-        bound = bind_args(fun, resolver, self)
-        return fun(*bound.args, **bound.kwargs)
-    fun._zweb_resource = decor
-    if not hasattr(fun, '_zweb_post'):
-        fun._zweb_post = []
+    fun._zweb = _RESOURCE_METHOD
+    if not hasattr(fun, '_zweb_bind_args'):
+        fun._zweb_bind_args = _bind_args
     if not hasattr(fun, '_zweb_providers'):
         fun._zweb_providers = {}
     return fun
 
 
+def _bind_page_args(fun, resolver):
+    args, kwargs = _bind_args(fun, resolver)
+    if next(resolver.positional_args, sentinel) is not sentinel:
+        log.info("Too many positional args for %r", fun)
+        raise NotFound()
+    if resolver.keyword_args:
+        log.info("Too many keyword args for %r", fun)
+        raise NotFound()
+    return args, kwargs
+
+
+def _page_decorator(fun, self, resolver):
+    args, kwargs = fun._zweb_bind_args(fun, resolver)
+    result = fun(*args, **kwargs)
+    for proc in fun._zweb_post:
+        result = proc(self, resolver, result)
+    return result
+
+
 def page(fun):
     """Decorator to denote a method which returns some result to the user"""
-    callee = getattr(fun, '_zweb_page', fun)
-    def decor(self, resolver):
-        bound = bind_args(fun, resolver, self)
-        if next(resolver.positional_args, sentinel) is not sentinel:
-            log.info("Too many positional args for %r", fun)
-            raise NotFound()
-        if resolver.keyword_args:
-            log.info("Too many keyword args for %r", fun)
-            raise NotFound()
-        result = callee(*bound.args, **bound.kwargs)
-        for proc in fun._zweb_post:
-            result = proc(self, resolver, result)
-        return result
     if not hasattr(fun, '_zweb_post'):
         fun._zweb_post = []
     if not hasattr(fun, '_zweb_providers'):
         fun._zweb_providers = {}
-    fun._zweb_page = decor
+    fun._zweb = _PAGE_METHOD
+    if not hasattr(fun, '_zweb_bind_args'):
+        fun._zweb_bind_args = _bind_page_args
     return fun
 
 
@@ -353,9 +370,8 @@ def provider(fun, cls):
     return wrapper
 
 
-def wrapper(fun):
-    def decorator(wrap):
-        fun._zweb_page = wrap
+def argument_parser(fun):
+    def decorator(parser):
+        fun._zweb_bind_args = parser
         return fun
     return decorator
-

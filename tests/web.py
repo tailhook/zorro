@@ -111,6 +111,7 @@ class TestWeb(unittest.TestCase):
     def testDecorators(self):
         from time import time
         from zorro import web
+        from functools import wraps
         from collections import namedtuple
         User = namedtuple("User", 'id')
 
@@ -135,13 +136,27 @@ class TestWeb(unittest.TestCase):
                 return User(uid)
             return provider
 
+        def special_args(fun):
+            @web.argument_parser(fun)
+            def make_args(fun, resolver):
+                return (1, 2), {'key': 7}
+            return fun
+
+        def hardcode_args(*args, **kw):
+            def decorator(fun):
+                @web.argument_parser(fun)
+                def return_args(fun, resolver):
+                    return args, kw
+                return fun
+            return decorator
+
         last_latency = None
         def timeit(fun):
-            @web.wrapper(fun)
-            def wrapper(self, *args, **kw):
+            @wraps(fun)
+            def wrapper(self, *args, **kwargs):
                 nonlocal last_latency
                 start = time()
-                result = fun(self, *args, **kw)
+                result = fun(self, *args, **kwargs)
                 last_latency = time() - start
                 return result
             return wrapper
@@ -187,6 +202,16 @@ class TestWeb(unittest.TestCase):
             def forum(self, user:User):
                 return Forum(user)
 
+            @special_args
+            @web.page
+            def special(self, a, b, key):
+                return 'special({}, {}, {})'.format(a, b, key)
+
+            @web.page
+            @hardcode_args(7, 8, 9, value=4)
+            def hardcode(self, a, b, c, value):
+                return 'hardcode({}, {}, {}, {})'.format(a, b, c, value)
+
         class Forum(web.Resource):
 
             def __init__(self, user):
@@ -204,8 +229,6 @@ class TestWeb(unittest.TestCase):
         self.assertEqual(s(b'/profile?uid=3'), 'profile(3)')
         self.assertEqual(s(b'/friend/2?uid=3'), 'profile(3).friend(2)')
         self.assertEqual(s(b'/info/3'), 'prefix:[info(3)]')
-        #self.assertTrue(last_latency < 0.01)  # will also fail if it's None
-        #last_latency = None
         self.assertEqual(s(b'/banner/3?uid=4'),
             'prefix:[[banner(ad:3, uid:4, position:norm)]:suf]')
         self.assertTrue(last_latency < 0.01)  # will also fail if it's None
@@ -213,6 +236,10 @@ class TestWeb(unittest.TestCase):
             'prefix:[[banner(ad:2, uid:5, position:norm)]:suf]')
         self.assertEqual(s(b'/banner/3?uid=12&position=abc'),
             'prefix:[[banner(ad:3, uid:12, position:abc)]:suf]')
+        self.assertEqual(s(b'/special'), 'special(1, 2, 7)')
+        self.assertEqual(s(b'/special?key=123'), 'special(1, 2, 7)')
+        self.assertEqual(s(b'/hardcode'), 'hardcode(7, 8, 9, 4)')
+        self.assertEqual(s(b'/hardcode?value=123'), 'hardcode(7, 8, 9, 4)')
 
 
 if __name__ == '__main__':
