@@ -116,14 +116,14 @@ class TestWeb(unittest.TestCase):
 
         def add_prefix(fun):
             @web.postprocessor(fun)
-            def processor(resolver, value):
+            def processor(self, resolver, value):
                 return 'prefix:[' + value + ']'
             return processor
 
         def add_suffix(suffix):
             def decorator(fun):
                 @web.postprocessor(fun)
-                def processor(resolver, value):
+                def processor(self, resolver, value):
                     return '[' + value + ']:' + suffix
                 return processor
             return decorator

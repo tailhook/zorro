@@ -325,7 +325,7 @@ def page(fun):
             raise NotFound()
         result = callee(*bound.args, **bound.kwargs)
         for proc in fun._zweb_post:
-            result = proc(resolver, result)
+            result = proc(self, resolver, result)
         return result
     if not hasattr(fun, '_zweb_post'):
         fun._zweb_post = []
