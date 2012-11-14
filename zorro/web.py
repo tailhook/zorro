@@ -137,16 +137,16 @@ class PathResolver(object):
             node = node.resolve_local(i)
             kind = getattr(node, '_zweb', None)
             if kind is _PAGE_METHOD:
-                return _page_decorator(node, node.__self__, self)
+                return _dispatch_page(node, node.__self__, self)
             elif kind is _RESOURCE_METHOD:
-                node = _resource_decorator(node, node.__self__, self)
+                node = _dispatch_resource(node, node.__self__, self)
             elif kind is _RESOURCE:
                 pass
             else:
                 raise NotFound()  # probably impossible but ...
         if(hasattr(node, 'index')
             and getattr(node.index, '_zweb', None) is _PAGE_METHOD):
-            return _page_decorator(node.index, node, self)
+            return _dispatch_page(node.index, node, self)
         raise NotFound()
 
 
@@ -306,22 +306,26 @@ def _bind_args(fun, resolver):
     return bound.args, bound.kwargs
 
 
-def _resource_decorator(fun, self, resolver):
-    args, kwargs = fun._zweb_bind_args(fun, resolver)
+def _resource_call(fun, resolver):
+    args, kwargs = _bind_args(fun, resolver)
     return fun(*args, **kwargs)
+
+
+def _dispatch_resource(fun, self, resolver):
+    return fun._zweb_deco(fun, resolver)
 
 
 def resource(fun):
     """Decorator to denote a method which returns resource to be traversed"""
     fun._zweb = _RESOURCE_METHOD
-    if not hasattr(fun, '_zweb_bind_args'):
-        fun._zweb_bind_args = _bind_args
+    if not hasattr(fun, '_zweb_deco'):
+        fun._zweb_deco = _resource_call
     if not hasattr(fun, '_zweb_providers'):
         fun._zweb_providers = {}
     return fun
 
 
-def _bind_page_args(fun, resolver):
+def _page_call(fun, resolver):
     args, kwargs = _bind_args(fun, resolver)
     if next(resolver.positional_args, sentinel) is not sentinel:
         log.info("Too many positional args for %r", fun)
@@ -329,12 +333,11 @@ def _bind_page_args(fun, resolver):
     if resolver.keyword_args:
         log.info("Too many keyword args for %r", fun)
         raise NotFound()
-    return args, kwargs
+    return fun(*args, **kwargs)
 
 
-def _page_decorator(fun, self, resolver):
-    args, kwargs = fun._zweb_bind_args(fun, resolver)
-    result = fun(*args, **kwargs)
+def _dispatch_page(fun, self, resolver):
+    result = fun._zweb_deco(fun, resolver)
     for proc in fun._zweb_post:
         result = proc(self, resolver, result)
     return result
@@ -347,8 +350,8 @@ def page(fun):
     if not hasattr(fun, '_zweb_providers'):
         fun._zweb_providers = {}
     fun._zweb = _PAGE_METHOD
-    if not hasattr(fun, '_zweb_bind_args'):
-        fun._zweb_bind_args = _bind_page_args
+    if not hasattr(fun, '_zweb_deco'):
+        fun._zweb_deco = _page_call
     return fun
 
 
@@ -370,8 +373,8 @@ def provider(fun, cls):
     return wrapper
 
 
-def argument_parser(fun):
-    def decorator(parser):
-        fun._zweb_bind_args = parser
+def decorator(fun):
+    def wrapper(parser):
+        fun._zweb_deco = parser
         return fun
-    return decorator
+    return wrapper

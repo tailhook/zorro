@@ -136,19 +136,14 @@ class TestWeb(unittest.TestCase):
                 return User(uid)
             return provider
 
-        def special_args(fun):
-            @web.argument_parser(fun)
-            def make_args(fun, resolver):
-                return (1, 2), {'key': 7}
-            return fun
-
-        def hardcode_args(*args, **kw):
-            def decorator(fun):
-                @web.argument_parser(fun)
-                def return_args(fun, resolver):
-                    return args, kw
-                return fun
-            return decorator
+        def form(fun):
+            @web.decorator(fun)
+            def wrapper(fun, resolver):
+                if resolver.keyword_args:
+                    return fun(1, b=2)
+                else:
+                    return 'form'
+            return wrapper
 
         last_latency = None
         def timeit(fun):
@@ -202,15 +197,17 @@ class TestWeb(unittest.TestCase):
             def forum(self, user:User):
                 return Forum(user)
 
-            @special_args
+            @form
             @web.page
-            def special(self, a, b, key):
-                return 'special({}, {}, {})'.format(a, b, key)
+            def form1(self, a, b):
+                return 'form1({}, {})'.format(a, b)
 
+            @add_prefix
+            @add_user
             @web.page
-            @hardcode_args(7, 8, 9, value=4)
-            def hardcode(self, a, b, c, value):
-                return 'hardcode({}, {}, {}, {})'.format(a, b, c, value)
+            @form
+            def form2(self, u:User, a, b):
+                return 'form2({}, {}, {})'.format(a, b, u.uid)
 
         class Forum(web.Resource):
 
@@ -236,10 +233,10 @@ class TestWeb(unittest.TestCase):
             'prefix:[[banner(ad:2, uid:5, position:norm)]:suf]')
         self.assertEqual(s(b'/banner/3?uid=12&position=abc'),
             'prefix:[[banner(ad:3, uid:12, position:abc)]:suf]')
-        self.assertEqual(s(b'/special'), 'special(1, 2, 7)')
-        self.assertEqual(s(b'/special?key=123'), 'special(1, 2, 7)')
-        self.assertEqual(s(b'/hardcode'), 'hardcode(7, 8, 9, 4)')
-        self.assertEqual(s(b'/hardcode?value=123'), 'hardcode(7, 8, 9, 4)')
+        self.assertEqual(s(b'/form1'), 'form')
+        self.assertEqual(s(b'/form1?a=7'), 'form1(1, 2)')
+        self.assertEqual(s(b'/form2'), 'prefix:[form]')
+        self.assertEqual(s(b'/form2?uid=8'), 'prefix:[form2(1, 2, 13)]')
 
 
 if __name__ == '__main__':
