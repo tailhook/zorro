@@ -121,6 +121,8 @@ class RequestChannel(channel.PipelinedReqChannel):
             clen = headers.get('Content-Length', None)
 
             if clen is None:
+                if headers.get('Connection', '').lower() != 'close':
+                    raise EOFError('Impossible to determine content length')
                 try:
                     while True:
                         readmore()
