@@ -118,7 +118,18 @@ class RequestChannel(channel.PipelinedReqChannel):
                         headers[k] = v.strip()
                 else:
                     raise EOFError("Wrong http headers")
-            clen = int(headers.get('Content-Length', '0'))
+            clen = headers.get('Content-Length', None)
+
+            if clen is None:
+                if headers.get('Connection', '').lower() != 'close':
+                    raise EOFError('Impossible to determine content length')
+                try:
+                    while True:
+                        readmore()
+                except EOFError:
+                     return status, headers, buf
+
+            clen = int(clen)
             if clen < 0:
                 raise EOFError("Wrong content length")
             while pos[0] + clen > len(buf):
