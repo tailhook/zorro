@@ -230,7 +230,7 @@ class Site(object):
             return result
 
 
-def _bind_args(fun, resolver):
+def _bind_args(fun, resolver, args, kwargs):
     sig = signature(fun)
     providers = fun._zweb_providers
     still_positional = True
@@ -251,7 +251,7 @@ def _bind_args(fun, resolver):
 
         if param.kind == Parameter.POSITIONAL_ONLY:
             try:
-                pos.append(next(resolver.positional_args))
+                pos.append(next(args))
             except StopIteration:
                 if param.default is Parameter.empty:
                     log.info("No positional argument %r for %r", name, fun)
@@ -261,33 +261,33 @@ def _bind_args(fun, resolver):
         elif param.kind == Parameter.POSITIONAL_OR_KEYWORD:
             if still_positional:
                 try:
-                    pos.append(next(resolver.positional_args))
+                    pos.append(next(args))
                 except StopIteration:
                     still_positional = False
                     pass
                 else:
                     continue
             try:
-                kw[name] = resolver.keyword_args.pop(name)
+                kw[name] = kwargs.pop(name)
             except KeyError:
                 if param.default is Parameter.empty:
                     log.info("No argument %r for %r", name, fun)
                     raise NotFound()
         elif param.kind == Parameter.VAR_POSITIONAL:
             still_positional = False
-            pos.extend(resolver.positional_args)
+            pos.extend(args)
         elif param.kind == Parameter.KEYWORD_ONLY:
             still_positional = False
             try:
-                kw[name] = resolver.keyword_args.pop(name)
+                kw[name] = kwargs.pop(name)
             except KeyError:
                 if param.default is Parameter.empty:
                     log.info("No keyword argument %r for %r", name, fun)
                     raise NotFound()
         elif param.kind == Parameter.VAR_KEYWORD:
             still_positional = False
-            kw.update(resolver.keyword_args)
-            resolver.keyword_args.clear()
+            kw.update(kwargs)
+            kwargs.clear()
         else:
             raise NotImplementedError(param.kind)
     try:
@@ -307,7 +307,8 @@ def _bind_args(fun, resolver):
 
 
 def _resource_call(fun, resolver):
-    args, kwargs = _bind_args(fun, resolver)
+    args, kwargs = _bind_args(fun, resolver,
+        resolver.positional_args, resolver.keyword_args)
     return fun(*args, **kwargs)
 
 
@@ -326,7 +327,8 @@ def resource(fun):
 
 
 def _page_call(fun, resolver):
-    args, kwargs = _bind_args(fun, resolver)
+    args, kwargs = _bind_args(fun, resolver,
+        resolver.positional_args, resolver.keyword_args)
     if next(resolver.positional_args, sentinel) is not sentinel:
         log.info("Too many positional args for %r", fun)
         raise NotFound()
