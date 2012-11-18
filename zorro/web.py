@@ -15,6 +15,7 @@ sentinel = object()
 _PAGE_METHOD = object()
 _RESOURCE_METHOD = object()
 _RESOURCE = object()
+_FORM_CTYPE = b'application/x-www-form-urlencoded'
 
 
 class LegacyMultiDict(object):
@@ -54,7 +55,7 @@ class Request(object):
         if hasattr(self, 'uri'):
             arguments.update(parse_qsl(self.parsed_uri.query))
         body = getattr(self, 'body', None)
-        if body and getattr(self, 'content_type', None) == FORM_CTYPE:
+        if body and getattr(self, 'content_type', None) == _FORM_CTYPE:
             arguments.update(parse_qsl(self.body.decode('ascii')))
         return arguments
 
