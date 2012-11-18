@@ -1,10 +1,14 @@
 import unittest
+from time import time
+from functools import wraps
+from collections import namedtuple
+
+from zorro import web
 
 
-class TestWeb(unittest.TestCase):
+class TestLocalDispatch(unittest.TestCase):
 
-    def testLocalDispatch(self):
-        from zorro import web
+    def setUp(self):
 
         class MyRes(web.Resource):
 
@@ -19,22 +23,34 @@ class TestWeb(unittest.TestCase):
             def invisible(self):
                 return 'invisible'
 
-        r = MyRes()
+        self.r = MyRes()
 
-        self.assertEqual(r.resolve_local('hello'), r.hello)
-        with self.assertRaises(web.NotFound):
-            r.resolve_local('_hidden')
-        with self.assertRaises(web.NotFound):
-            r.resolve_local('invisible')
-        with self.assertRaises(web.NotFound):
-            r.resolve_local('hello world')
 
-    def testResolve(self):
-        from zorro import web
+    def testOK(self):
+        self.assertEqual(self.r.resolve_local('hello'), self.r.hello)
+
+    def testHidden(self):
+        with self.assertRaises(web.NotFound):
+            self.r.resolve_local('_hidden')
+
+    def testInvisible(self):
+        with self.assertRaises(web.NotFound):
+            self.r.resolve_local('invisible')
+
+    def testStrange(self):
+        with self.assertRaises(web.NotFound):
+            self.r.resolve_local('hello world')
+
+
+class TestResolve(unittest.TestCase):
+
+    def setUp(self):
 
         class Request(web.Request):
             def __init__(self, uri):
                 self.uri = uri
+
+        self.Request = Request
 
         class Root(web.Resource):
 
@@ -73,46 +89,83 @@ class TestWeb(unittest.TestCase):
             def topic(self, topic:int, *, offset:int = 0, num:int = 10):
                 return 'forum({}).topic({})[{}:{}]'.format(
                     self.id, topic, offset, num)
+        self.site = web.Site(request_class=Request, resources=[Root()])
 
+    def resolve(self, uri):
+        return self.site._resolve(self.Request(uri))
 
-        site = web.Site(request_class=Request, resources=[Root()])
-        s = lambda v: site._resolve(Request(v))
-        self.assertEqual(s(b'/'), 'index')
-        self.assertEqual(s(b'/about'), 'about')
-        self.assertEqual(s(b'/about/'), 'about')
+    def testIndex(self):
+        self.assertEqual(self.resolve(b'/'), 'index')
+
+    def testPage(self):
+        self.assertEqual(self.resolve(b'/about'), 'about')
+
+    def testSlash(self):
+        self.assertEqual(self.resolve(b'/about/'), 'about')
+
+    def testSuffix(self):
         with self.assertRaises(web.NotFound):
-            s(b'/about/test')
-        self.assertEqual(site(b'/forum'), 'forums')
-        self.assertEqual(site(b'/forum/'), 'forums')
-        self.assertEqual(s(b'/forum/10'), 'forum(10).index')
-        self.assertEqual(s(b'/forum/10/'), 'forum(10).index')
-        self.assertEqual(s(b'/forum?id=10'), 'forum(10).index')
-        self.assertEqual(s(b'/forum/?id=10'), 'forum(10).index')
+            self.resolve(b'/about/test')
+
+    def testRedirect(self):
+        self.assertEqual(self.site(b'/forum'), 'forums')
+
+    def testSlashRedirect(self):
+        self.assertEqual(self.site(b'/forum/'), 'forums')
+
+    def testArg(self):
+        self.assertEqual(self.resolve(b'/forum/10'), 'forum(10).index')
+
+    def testArgSlash(self):
+        self.assertEqual(self.resolve(b'/forum/10/'), 'forum(10).index')
+
+    def testArgQuery(self):
+        self.assertEqual(self.resolve(b'/forum?id=10'), 'forum(10).index')
+
+    def testArgQuerySlash(self):
+        self.assertEqual(self.resolve(b'/forum/?id=10'), 'forum(10).index')
+
+    def testQueryAndPos(self):
         with self.assertRaises(web.NotFound):
-            s(b'/forum/10?id=10')
+            self.resolve(b'/forum/10?id=10')
+
+    def testValueError(self):
         with self.assertRaises(web.NotFound):
-            s(b'/forum/test')
-        self.assertEqual(s(b'/forum/11/new_topic'),
+            self.resolve(b'/forum/test')
+
+    def testNested(self):
+        self.assertEqual(self.resolve(b'/forum/11/new_topic'),
             'forum(11).new_topic')
-        self.assertEqual(s(b'/forum/11/new_topic/'),
+
+    def testNestedSlash(self):
+        self.assertEqual(self.resolve(b'/forum/11/new_topic/'),
             'forum(11).new_topic')
-        self.assertEqual(s(b'/forum/12/topic/10'),
+
+    def testNestedArg(self):
+        self.assertEqual(self.resolve(b'/forum/12/topic/10'),
             'forum(12).topic(10)[0:10]')
-        self.assertEqual(s(b'/forum/12/topic/10?offset=10'),
+
+    def testNestedQuery(self):
+        self.assertEqual(self.resolve(b'/forum/12/topic/10?offset=10'),
             'forum(12).topic(10)[10:10]')
+
+    def testNestedExcessive(self):
         with self.assertRaises(web.NotFound):
-            s(b'/forum/12/topic/10/10')
-        self.assertEqual(s(b'/forum/12/topic/10?offset=20&num=20'),
+            self.resolve(b'/forum/12/topic/10/10')
+
+    def testNestedQuery2(self):
+        self.assertEqual(self.resolve(b'/forum/12/topic/10?offset=20&num=20'),
             'forum(12).topic(10)[20:20]')
+
+    def testNestedAllQuery(self):
         self.assertEqual(
-            s(b'/forum/12/topic?topic=13&offset=20&num=20'),
+            self.resolve(b'/forum/12/topic?topic=13&offset=20&num=20'),
             'forum(12).topic(13)[20:20]')
 
-    def testDecorators(self):
-        from time import time
-        from zorro import web
-        from functools import wraps
-        from collections import namedtuple
+
+class TestDecorators(unittest.TestCase):
+
+    def setUp(self):
 
         @web.Sticker.register
         class User(object):
@@ -151,14 +204,13 @@ class TestWeb(unittest.TestCase):
                 return meth(self, resolver, a, b=b, c=69)
             return wrapper
 
-        last_latency = None
+        self.last_latency = None
         def timeit(fun):
             @wraps(fun)
-            def wrapper(self, *args, **kwargs):
-                nonlocal last_latency
+            def wrapper(me, *args, **kwargs):
                 start = time()
-                result = fun(self, *args, **kwargs)
-                last_latency = time() - start
+                result = fun(me, *args, **kwargs)
+                self.last_latency = time() - start
                 return result
             return wrapper
 
@@ -220,25 +272,54 @@ class TestWeb(unittest.TestCase):
             def index(self):
                 return "forum(user:{})".format(self.user.id)
 
+        self.site = web.Site(request_class=Request, resources=[Root()])
+        self.Request = Request
 
-        site = web.Site(request_class=Request, resources=[Root()])
-        s = lambda v: site._resolve(Request(v))
-        self.assertEqual(s(b'/about'), 'prefix:[about]')
-        self.assertEqual(s(b'/forum?uid=7'), 'forum(user:7)')
-        self.assertEqual(s(b'/profile?uid=3'), 'profile(3)')
-        self.assertEqual(s(b'/friend/2?uid=3'), 'profile(3).friend(2)')
-        self.assertEqual(s(b'/info/3'), 'prefix:[info(3)]')
-        self.assertEqual(s(b'/banner/3?uid=4'),
+    def resolve(self, uri):
+        return self.site._resolve(self.Request(uri))
+
+    def testPost(self):
+        self.assertEqual(self.resolve(b'/about'), 'prefix:[about]')
+
+    def testResourceSticker(self):
+        self.assertEqual(self.resolve(b'/forum?uid=7'), 'forum(user:7)')
+
+    def testSticker(self):
+        self.assertEqual(self.resolve(b'/profile?uid=3'), 'profile(3)')
+
+    def testStickerArg(self):
+        self.assertEqual(self.resolve(b'/friend/2?uid=3'),
+            'profile(3).friend(2)')
+
+    def testPostArg(self):
+        self.assertEqual(self.resolve(b'/info/3'), 'prefix:[info(3)]')
+
+    def test2PostAndWrapDefPos(self):
+        self.assertEqual(self.resolve(b'/banner/3?uid=4'),
             'prefix:[[banner(ad:3, uid:4, position:norm)]:suf]')
-        self.assertTrue(last_latency < 0.01)  # will also fail if it's None
-        self.assertEqual(s(b'/banner/?ad=2&uid=5'),
+        self.assertTrue(self.last_latency < 0.01)  # also fail if it's None
+
+    def test2PostAndWrapDefQuery(self):
+        self.assertEqual(self.resolve(b'/banner/?ad=2&uid=5'),
             'prefix:[[banner(ad:2, uid:5, position:norm)]:suf]')
-        self.assertEqual(s(b'/banner/3?uid=12&position=abc'),
+        self.assertTrue(self.last_latency < 0.01)  # also fail if it's None
+
+    def test2PostAndWrapFull(self):
+        self.assertEqual(self.resolve(b'/banner/3?uid=12&position=abc'),
             'prefix:[[banner(ad:3, uid:12, position:abc)]:suf]')
-        self.assertEqual(s(b'/form1'), 'form')
-        self.assertEqual(s(b'/form1?a=7'), 'form1(1, 2)')
-        self.assertEqual(s(b'/form2'), 'prefix:[form]')
-        self.assertEqual(s(b'/form2?uid=13'), 'prefix:[form2(1, 2, 69, 13)]')
+
+    def testDecoSkip(self):
+        self.assertEqual(self.resolve(b'/form1'), 'form')
+
+    def testDecoInvent(self):
+        self.assertEqual(self.resolve(b'/form1?a=7'), 'form1(1, 2)')
+
+    def test2DecoSkip(self):
+        self.assertEqual(self.resolve(b'/form2'), 'prefix:[form]')
+
+    def test2DecoInvent(self):
+        self.assertEqual(self.resolve(b'/form2?uid=13'),
+            'prefix:[form2(1, 2, 69, 13)]')
 
 
 if __name__ == '__main__':
