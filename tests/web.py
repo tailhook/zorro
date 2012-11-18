@@ -113,7 +113,14 @@ class TestWeb(unittest.TestCase):
         from zorro import web
         from functools import wraps
         from collections import namedtuple
-        User = namedtuple("User", 'id')
+
+        @web.Sticker.register
+        class User(object):
+            def __init__(self, uid):
+                self.id = uid
+            @classmethod
+            def create(cls, resolver):
+                return cls(int(resolver.request.form_arguments.get('uid')))
 
         def add_prefix(fun):
             @web.postprocessor(fun)
@@ -129,20 +136,19 @@ class TestWeb(unittest.TestCase):
                 return processor
             return decorator
 
-        def add_user(fun):
-            @web.provider(fun, User)
-            def provider(resolver):
-                uid = int(resolver.keyword_args.pop('uid'))
-                return User(uid)
-            return provider
-
         def form(fun):
             @web.decorator(fun)
-            def wrapper(fun, resolver):
-                if resolver.keyword_args:
-                    return fun(1, b=2)
+            def wrapper(self, resolver, meth):
+                if resolver.request.form_arguments:
+                    return meth(self, resolver, 1, b=2)
                 else:
                     return 'form'
+            return wrapper
+
+        def hidden(fun):
+            @web.decorator(fun)
+            def wrapper(self, resolver, meth, a, b):
+                return meth(self, resolver, a, b=b, c=69)
             return wrapper
 
         last_latency = None
@@ -169,11 +175,9 @@ class TestWeb(unittest.TestCase):
                 return 'about'
 
             @web.page
-            @add_user
             def profile(self, user: User):
                 return 'profile(%d)' % (user.id)
 
-            @add_user
             @web.page
             def friend(self, user: User, friend: int):
                 return 'profile(%d).friend(%d)' % (user.id, friend)
@@ -184,7 +188,6 @@ class TestWeb(unittest.TestCase):
                 return 'info(%d)' % uid
 
             @web.page
-            @add_user
             @timeit
             @add_prefix
             @add_suffix('suf')
@@ -193,7 +196,6 @@ class TestWeb(unittest.TestCase):
                     ad, user.id, position)
 
             @web.resource
-            @add_user
             def forum(self, user:User):
                 return Forum(user)
 
@@ -203,11 +205,11 @@ class TestWeb(unittest.TestCase):
                 return 'form1({}, {})'.format(a, b)
 
             @add_prefix
-            @add_user
             @web.page
             @form
-            def form2(self, u:User, a, b):
-                return 'form2({}, {}, {})'.format(a, b, u.uid)
+            @hidden
+            def form2(self, u:User, a, b, c):
+                return 'form2({}, {}, {}, {})'.format(a, b, c, u.id)
 
         class Forum(web.Resource):
 
@@ -236,7 +238,7 @@ class TestWeb(unittest.TestCase):
         self.assertEqual(s(b'/form1'), 'form')
         self.assertEqual(s(b'/form1?a=7'), 'form1(1, 2)')
         self.assertEqual(s(b'/form2'), 'prefix:[form]')
-        self.assertEqual(s(b'/form2?uid=8'), 'prefix:[form2(1, 2, 13)]')
+        self.assertEqual(s(b'/form2?uid=13'), 'prefix:[form2(1, 2, 69, 13)]')
 
 
 if __name__ == '__main__':

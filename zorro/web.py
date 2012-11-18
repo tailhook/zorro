@@ -1,9 +1,12 @@
 import abc
 import logging
-from inspect import signature, Parameter
+import inspect
 from urllib.parse import urlparse, parse_qsl
+from itertools import zip_longest
+from collections import OrderedDict
 
 from .util import cached_property
+
 
 log = logging.getLogger(__name__)
 sentinel = object()
@@ -128,18 +131,18 @@ class PathResolver(object):
             self.parts = path.split('/')
         else:
             self.parts = ()
-        self.path_iter = self.positional_args = iter(self.parts)
-        self.keyword_args = self.request.form_arguments.copy()
+        self.args = tuple(self.parts)
 
     def resolve(self, root):
         node = root
-        for i in self.path_iter:
+        while self.args:
+            i, *self.args = self.args
             node = node.resolve_local(i)
             kind = getattr(node, '_zweb', None)
             if kind is _PAGE_METHOD:
                 return _dispatch_page(node, node.__self__, self)
             elif kind is _RESOURCE_METHOD:
-                node = _dispatch_resource(node, node.__self__, self)
+                node, self.args = _dispatch_resource(node, node.__self__, self)
             elif kind is _RESOURCE:
                 pass
             else:
@@ -230,116 +233,131 @@ class Site(object):
             return result
 
 
-def _bind_args(fun, resolver, args, kwargs):
-    sig = signature(fun)
-    providers = fun._zweb_providers
-    still_positional = True
-    pos = []
-    kw = {}
-    for i, (name, param) in enumerate(sig.parameters.items()):
-        prov = providers.get(param.annotation, None)
-        if prov is not None:
-            if(param.kind in (Parameter.POSITIONAL_ONLY,
-                              Parameter.POSITIONAL_OR_KEYWORD)
-               and still_positional):
-                # It's expected that combination of POSITIONAL_ONLY
-                # and not still_positional is impossible by signature
-                pos.append(prov(resolver))
-            else:
-                kw[name] = prov(resolver)
-            continue
-
-        if param.kind == Parameter.POSITIONAL_ONLY:
-            try:
-                pos.append(next(args))
-            except StopIteration:
-                if param.default is Parameter.empty:
-                    log.info("No positional argument %r for %r", name, fun)
-                    raise NotFound()
-                else:
-                    still_positional = False
-        elif param.kind == Parameter.POSITIONAL_OR_KEYWORD:
-            if still_positional:
-                try:
-                    pos.append(next(args))
-                except StopIteration:
-                    still_positional = False
-                    pass
-                else:
-                    continue
-            try:
-                kw[name] = kwargs.pop(name)
-            except KeyError:
-                if param.default is Parameter.empty:
-                    log.info("No argument %r for %r", name, fun)
-                    raise NotFound()
-        elif param.kind == Parameter.VAR_POSITIONAL:
-            still_positional = False
-            pos.extend(args)
-        elif param.kind == Parameter.KEYWORD_ONLY:
-            still_positional = False
-            try:
-                kw[name] = kwargs.pop(name)
-            except KeyError:
-                if param.default is Parameter.empty:
-                    log.info("No keyword argument %r for %r", name, fun)
-                    raise NotFound()
-        elif param.kind == Parameter.VAR_KEYWORD:
-            still_positional = False
-            kw.update(kwargs)
-            kwargs.clear()
-        else:
-            raise NotImplementedError(param.kind)
-    try:
-        bound = sig.bind(*pos, **kw)
-    except TypeError as e:
-        log.info("Error binding signature", exc_info=e)
-        raise NotFound()
-    for k, v in bound.arguments.items():
-        an = sig.parameters[k].annotation
-        if an is not Parameter.empty and an not in providers:
-            try:
-                bound.arguments[k] = an(v)
-            except (ValueError, TypeError):
-                log.info("Error coercing %r into %r", v, an)
-                raise NotFound()
-    return bound.args, bound.kwargs
-
-
-def _resource_call(fun, resolver):
-    args, kwargs = _bind_args(fun, resolver,
-        resolver.positional_args, resolver.keyword_args)
-    return fun(*args, **kwargs)
-
-
 def _dispatch_resource(fun, self, resolver):
-    return fun._zweb_deco(fun, resolver)
+    deco = getattr(fun, '_zweb_deco', None)
+    if deco is not None:
+        return deco(self, resolver, fun._zweb_sig)
+    else:
+        try:
+            args, tail, kw = fun._zweb_sig(resolver,
+                *resolver.args, **resolver.request.form_arguments)
+        except (TypeError, ValueError) as e:
+            log.debug("Signature mismatch %r %r",
+                resolver.args, resolver.request.form_arguments,
+                exc_info=e)  # debug
+            raise NotFound()
+        else:
+            return fun(*args, **kw), tail
 
+
+class ReprHack(str):
+    __slots__ = ()
+    def __repr__(self):
+        return str(self)
+
+
+def _compile_signature(fun, partial):
+    sig = inspect.signature(fun)
+    fun_params = [
+        inspect.Parameter('resolver',
+            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+    args = []
+    kwargs = []
+    vars = {
+        '__empty__': object(),
+        }
+    lines = []
+    annotations = {}
+    self = True
+    varkw = False
+    varpos = False
+
+    for name, param in sig.parameters.items():
+        ann = param.annotation
+        if param.default is not inspect.Parameter.empty:
+            vars[name + '_def'] = param.default
+            defname = ReprHack('__empty__')
+        else:
+            defname = inspect.Parameter.empty
+        if ann is not inspect.Parameter.empty:
+            if isinstance(ann, type) and issubclass(ann, Sticker):
+                lines.append('  {0} = {0}_create(resolver)'.format(name))
+                vars[name + '_create'] = ann.create
+            else:
+                lines.append('  if {0} is __empty__:'.format(name))
+                lines.append('    {0} = {0}_def'.format(name))
+                lines.append('  else:')
+                if isinstance(ann, type) and ann.__module__ == 'builtins':
+                    lines.append('    {0} = {1}({0})'.format(
+                        name, ann.__name__))
+                    fun_params.append(param.replace(
+                        default=defname))
+                else:
+                    lines.append('    {0} = {0}_type({0})'.format(name))
+                    vars[name + '_type'] = ann
+                    fun_params.append(param.replace(
+                        annotation=ReprHack(name + '_type'),
+                        default=defname))
+        elif not self:
+            fun_params.append(param.replace(default=defname))
+
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            varkw = True
+        elif param.kind == inspect.Parameter.VAR_POSITIONAL:
+            varpos = name
+        if param.kind == inspect.Parameter.KEYWORD_ONLY:
+            kwargs.append('{0!r}: {0}'.format(name))
+        elif not self:
+            args.append(name)
+        if self:
+            self = False
+    if not varpos and partial:
+        fun_params.append(inspect.Parameter('__tail__',
+            kind=inspect.Parameter.VAR_POSITIONAL))
+    if not varkw:
+        fun_params.append(inspect.Parameter('__kw__',
+            kind=inspect.Parameter.VAR_KEYWORD))
+    funsig = inspect.Signature(fun_params)
+    lines.insert(0, 'def __sig__{}:'.format(funsig))
+    if len(args) == 1:
+        args = args[0] + ','
+    else:
+        args = ', '.join(args)
+    if varpos:
+        lines.append('  return ({}) + {}, (), {{{}}}'.format(
+            args, varpos,  ', '.join(kwargs)))
+    elif partial:
+        lines.append('  return ({}), __tail__, {{{}}}'.format(
+            args, ', '.join(kwargs)))
+    else:
+        lines.append('  return ({}), (), {{{}}}'.format(
+            args, ', '.join(kwargs)))
+    code = compile('\n'.join(lines), '__sig__', 'exec')
+    exec(code, vars)
+    return vars['__sig__']
 
 def resource(fun):
     """Decorator to denote a method which returns resource to be traversed"""
     fun._zweb = _RESOURCE_METHOD
-    if not hasattr(fun, '_zweb_deco'):
-        fun._zweb_deco = _resource_call
-    if not hasattr(fun, '_zweb_providers'):
-        fun._zweb_providers = {}
+    fun._zweb_sig = _compile_signature(fun, partial=True)
     return fun
 
 
-def _page_call(fun, resolver):
-    args, kwargs = _bind_args(fun, resolver,
-        resolver.positional_args, resolver.keyword_args)
-    if next(resolver.positional_args, sentinel) is not sentinel:
-        log.info("Too many positional args for %r", fun)
-        raise NotFound()
-    if resolver.keyword_args:
-        log.info("Too many keyword args for %r", fun)
-        raise NotFound()
-    return fun(*args, **kwargs)
-
-
 def _dispatch_page(fun, self, resolver):
-    result = fun._zweb_deco(fun, resolver)
+    deco = getattr(fun, '_zweb_deco', None)
+    if deco is not None:
+        result = deco(self, resolver, fun._zweb_deco_callee)
+    else:
+        try:
+            args, tail, kw = fun._zweb_sig(resolver,
+                *resolver.args, **resolver.request.form_arguments)
+        except (TypeError, ValueError) as e:
+            log.debug("Signature mismatch %r %r",
+                resolver.args, resolver.request.form_arguments,
+                exc_info=e)  # debug
+            raise NotFound()
+        else:
+            result = fun(*args, **kw)
     for proc in fun._zweb_post:
         result = proc(self, resolver, result)
     return result
@@ -349,11 +367,8 @@ def page(fun):
     """Decorator to denote a method which returns some result to the user"""
     if not hasattr(fun, '_zweb_post'):
         fun._zweb_post = []
-    if not hasattr(fun, '_zweb_providers'):
-        fun._zweb_providers = {}
     fun._zweb = _PAGE_METHOD
-    if not hasattr(fun, '_zweb_deco'):
-        fun._zweb_deco = _page_call
+    fun._zweb_sig = _compile_signature(fun, partial=False)
     return fun
 
 
@@ -366,17 +381,59 @@ def postprocessor(fun):
     return wrapper
 
 
-def provider(fun, cls):
-    if not hasattr(fun, '_zweb_providers'):
-        fun._zweb_providers = {}
-    def wrapper(prov):
-        fun._zweb_providers[cls] = prov
-        return fun
-    return wrapper
-
-
 def decorator(fun):
     def wrapper(parser):
+        olddec = getattr(fun, '_zweb_deco', None)
+        oldcallee = getattr(fun, '_zweb_deco_callee', None)
+        if olddec is None:
+            def calee(self, resolver, *args, **kw):
+                try:
+                    args, tail, kw = fun._zweb_sig(resolver, *args, **kw)
+                except (TypeError, ValueError) as e:
+                    log.debug("Signature mismatch %r %r", args, kw,
+                        exc_info=e)  # debug
+                    raise NotFound()
+                else:
+                    return fun(self, *args, **kw)
+        else:
+            def calee(self, resolver, *args, **kw):
+                return olddec(self, resolver, oldcallee, *args, **kw)
+
         fun._zweb_deco = parser
+        fun._zweb_deco_callee = calee
         return fun
     return wrapper
+
+
+class Sticker(metaclass=abc.ABCMeta):
+    """
+    An object which is automatically put into arguments in the view if
+    specified in annotation
+    """
+    __superseded = {}
+
+    @classmethod
+    @abc.abstractmethod
+    def create(cls, resolver):
+        """Creates an object of this class based on resolver"""
+
+    @classmethod
+    @abc.abstractmethod
+    def create(cls, resolver):
+        """Creates an object of this class based on resolver"""
+
+    @classmethod
+    def supersede(cls, sub):
+        oldsup = cls.__superseeded.get(cls, None)
+        if oldsup is not None:
+            if issubclass(sub, oldsup):
+                pass  # just supersede it again
+            elif issubclass(oldsup, sub):
+                return  # already superseeded by more specific subclass
+            else:
+                raise RuntimeError("{!r} is already superseeded by {!r}"
+                    .format(cls, oldsup))
+
+        super().register(sub)
+        cls.__superseded[cls] = sub
+
