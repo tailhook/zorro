@@ -322,6 +322,96 @@ class TestDecorators(unittest.TestCase):
             'prefix:[form2(1, 2, 69, 13)]')
 
 
+class TestMethod(unittest.TestCase):
+
+    def setUp(self):
+
+        class Request(web.Request):
+            def __init__(self, meth, uri):
+                self.method = meth
+                self.uri = uri
+
+        class Root(web.Resource):
+
+            def __init__(self):
+                super().__init__()
+                self.about = About()
+
+            @web.resource
+            def forum(self, uid:int):
+                return Forum(uid)
+
+
+        class About(web.Resource):
+            """Uses default resolver"""
+
+            @web.page
+            def index(self):
+                return 'blank'
+
+            @web.page
+            def more(self, page:str):
+                return 'PAGE:%s' % page
+
+        class Forum(web.Resource):
+            resolver_class = web.MethodResolver
+
+            def __init__(self, user):
+                self.user = user
+
+            @web.page
+            def GET(self):
+                return "forum(user:{})".format(self.user)
+
+            @web.page
+            def PATCH(self, topic:int):
+                return "set:forum(user:{},topic:{})".format(self.user, topic)
+
+        self.site = web.Site(request_class=Request, resources=[Root()])
+        self.Request = Request
+
+    def resolve(self, meth, uri):
+        return self.site._resolve(self.Request(meth, uri))
+
+    def testAbout(self):
+        self.assertEqual(self.resolve(b'GET', b'/about'), 'blank')
+
+    def testLessArgs(self):
+        with self.assertRaises(web.NotFound):
+            self.resolve(b'GET', b'/about/more')
+        with self.assertRaises(web.NotFound):
+            self.resolve(b'GET', b'/about/more/')
+
+    def testLonger(self):
+        self.assertEqual(self.resolve(b'GET', b'/about/more/abc'), 'PAGE:abc')
+
+    def testGet(self):
+        self.assertEqual(self.resolve(b'GET', b'/forum?uid=37'),
+            'forum(user:37)')
+
+    @unittest.expectedFailure
+    def testPatch(self):
+        self.assertEqual(self.resolve(b'PATCH', b'/forum/12?uid=37'),
+            'set:forum(user:37,topic:12)')
+
+    def testPatchQuery(self):
+        self.assertEqual(self.resolve(b'PATCH', b'/forum?uid=7&topic=6'),
+            'set:forum(user:7,topic:6)')
+
+    def testPatchQuerySlash(self):
+        self.assertEqual(self.resolve(b'PATCH', b'/forum/?uid=9&topic=8'),
+            'set:forum(user:9,topic:8)')
+
+    @unittest.expectedFailure
+    def testPatchSlash(self):
+        self.assertEqual(self.resolve(b'PATCH', b'/forum/77/?uid=9'),
+            'set:forum(user:9,topic:77)')
+
+    def testNotEnough(self):
+        with self.assertRaises(web.NotFound):
+            self.resolve(b'PATCH', b'/forum?uid=9')
+
+
 if __name__ == '__main__':
     unittest.main()
 

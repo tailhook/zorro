@@ -128,10 +128,9 @@ class PathResolver(object):
         self.request = request
         path = request.parsed_uri.path.strip('/')
         if path:
-            self.parts = path.split('/')
+            self.args = path.split('/')
         else:
-            self.parts = ()
-        self.args = tuple(self.parts)
+            self.args = ()
 
     def resolve(self, root):
         node = root
@@ -143,6 +142,9 @@ class PathResolver(object):
                 return _dispatch_page(node, node.__self__, self)
             elif kind is _RESOURCE_METHOD:
                 node, self.args = _dispatch_resource(node, node.__self__, self)
+                if not isinstance(self, node.resolver_class):
+                    newres =  node.resolver_class(self.request)
+                    return newres.resolve(node)
             elif kind is _RESOURCE:
                 pass
             else:
@@ -151,6 +153,13 @@ class PathResolver(object):
             and getattr(node.index, '_zweb', None) is _PAGE_METHOD):
             return _dispatch_page(node.index, node, self)
         raise NotFound()
+
+
+class MethodResolver(PathResolver):
+
+    def __init__(self, request):
+        self.request = request
+        self.args = (request.method.decode('ascii').upper(),)
 
 
 class InternalRedirect(Exception, metaclass=abc.ABCMeta):
