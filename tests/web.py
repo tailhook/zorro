@@ -191,9 +191,9 @@ class TestDecorators(unittest.TestCase):
 
         def form(fun):
             @web.decorator(fun)
-            def wrapper(self, resolver, meth):
+            def wrapper(self, resolver, meth, **kw):
                 if resolver.request.form_arguments:
-                    return meth(self, resolver, 1, b=2)
+                    return meth(1, b=2)
                 else:
                     return 'form'
             return wrapper
@@ -201,7 +201,7 @@ class TestDecorators(unittest.TestCase):
         def hidden(fun):
             @web.decorator(fun)
             def wrapper(self, resolver, meth, a, b):
-                return meth(self, resolver, a, b=b, c=69)
+                return meth(a, b=b, c=69)
             return wrapper
 
         self.last_latency = None

@@ -4,6 +4,7 @@ import inspect
 from urllib.parse import urlparse, parse_qsl
 from itertools import zip_longest
 from collections import OrderedDict
+from functools import partial
 
 from .util import cached_property
 
@@ -297,7 +298,9 @@ class Site(object):
 def _dispatch_resource(fun, self, resolver):
     deco = getattr(fun, '_zweb_deco', None)
     if deco is not None:
-        return deco(self, resolver, fun._zweb_sig)
+        return deco(self, resolver,
+            partial(fun._zweb_deco_callee, self, resolver),
+            *resolver.args, **resolver.request.form_arguments)
     else:
         try:
             args, tail, kw = fun._zweb_sig(resolver,
@@ -407,7 +410,9 @@ def resource(fun):
 def _dispatch_page(fun, self, resolver):
     deco = getattr(fun, '_zweb_deco', None)
     if deco is not None:
-        result = deco(self, resolver, fun._zweb_deco_callee)
+        result = deco(self, resolver,
+            partial(fun._zweb_deco_callee, self, resolver),
+            *resolver.args, **resolver.request.form_arguments)
     else:
         try:
             args, tail, kw = fun._zweb_sig(resolver,
@@ -447,7 +452,7 @@ def decorator(fun):
         olddec = getattr(fun, '_zweb_deco', None)
         oldcallee = getattr(fun, '_zweb_deco_callee', None)
         if olddec is None:
-            def calee(self, resolver, *args, **kw):
+            def callee(self, resolver, *args, **kw):
                 try:
                     args, tail, kw = fun._zweb_sig(resolver, *args, **kw)
                 except (TypeError, ValueError) as e:
@@ -457,11 +462,13 @@ def decorator(fun):
                 else:
                     return fun(self, *args, **kw)
         else:
-            def calee(self, resolver, *args, **kw):
-                return olddec(self, resolver, oldcallee, *args, **kw)
+            def callee(self, resolver, *args, **kw):
+                return olddec(self, resolver,
+                    partial(oldcallee, self, resolver),
+                    *args, **kw)
 
         fun._zweb_deco = parser
-        fun._zweb_deco_callee = calee
+        fun._zweb_deco_callee = callee
         return fun
     return wrapper
 
