@@ -122,21 +122,49 @@ class NotFound(WebException):
                 )
 
 
-class PathResolver(object):
+class MethodNotAllowed(WebException):
+
+    def default_response(self):
+        return (b'405 Method Not Allowed',
+                b'Content-Type\0text/html\0',
+                b'<!DOCTYPE html>'
+                b'<html>'
+                    b'<head>'
+                        b'<title>405 Method Not Allowed</title>'
+                    b'</head>'
+                    b'<body>'
+                    b'<h1>405 Method Not Allowed</h1>'
+                    b'</body>'
+                b'</html>'
+                )
+
+
+class ChildNotFound(Exception):
+    """Raised by resolve_local to notify that there is not such child"""
+
+
+class BaseResolver(metaclass=abc.ABCMeta):
 
     def __init__(self, request):
         self.request = request
-        path = request.parsed_uri.path.strip('/')
-        if path:
-            self.args = path.split('/')
-        else:
-            self.args = ()
+
+    @abc.abstractmethod
+    def __next__(self):
+        pass
+
+    def __iter__(self):
+        return self
+
+    def child_fallback(self):
+        raise NotFound()
 
     def resolve(self, root):
         node = root
-        while self.args:
-            i, *self.args = self.args
-            node = node.resolve_local(i)
+        for name in self:
+            try:
+                node = node.resolve_local(name)
+            except ChildNotFound:
+                node = self.child_fallback()
             kind = getattr(node, '_zweb', None)
             if kind is _PAGE_METHOD:
                 return _dispatch_page(node, node.__self__, self)
@@ -155,11 +183,35 @@ class PathResolver(object):
         raise NotFound()
 
 
-class MethodResolver(PathResolver):
+class PathResolver(BaseResolver):
 
     def __init__(self, request):
-        self.request = request
-        self.args = (request.method.decode('ascii').upper(),)
+        super().__init__(request)
+        path = request.parsed_uri.path.strip('/')
+        if path:
+            self.args = path.split('/')
+        else:
+            self.args = ()
+
+    def __next__(self):
+        if not self.args:
+            raise StopIteration()
+        name, *args = self.args
+        self.args = args
+        return name
+
+
+class MethodResolver(BaseResolver):
+
+    def __init__(self, request):
+        super().__init__(request)
+        self.args = ()
+
+    def __next__(self):
+        return self.request.method.decode('ascii').upper()
+
+    def child_fallback(self):
+        raise MethodNotAllowed()
 
 
 class InternalRedirect(Exception, metaclass=abc.ABCMeta):
@@ -185,14 +237,14 @@ class Resource(object):
 
     def resolve_local(self, name):
         if not name.isidentifier() or name.startswith('_'):
-            raise NotFound()
+            raise ChildNotFound()
         target = getattr(self, name, None)
         if target is None:
-            raise NotFound()
+            raise ChildNotFound()
         kind = getattr(target, '_zweb', None)
         if kind is not None:
             return target
-        raise NotFound()
+        raise ChildNotFound()
 
 
 class Site(object):

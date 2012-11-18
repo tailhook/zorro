@@ -30,15 +30,15 @@ class TestLocalDispatch(unittest.TestCase):
         self.assertEqual(self.r.resolve_local('hello'), self.r.hello)
 
     def testHidden(self):
-        with self.assertRaises(web.NotFound):
+        with self.assertRaises(web.ChildNotFound):
             self.r.resolve_local('_hidden')
 
     def testInvisible(self):
-        with self.assertRaises(web.NotFound):
+        with self.assertRaises(web.ChildNotFound):
             self.r.resolve_local('invisible')
 
     def testStrange(self):
-        with self.assertRaises(web.NotFound):
+        with self.assertRaises(web.ChildNotFound):
             self.r.resolve_local('hello world')
 
 
@@ -388,6 +388,14 @@ class TestMethod(unittest.TestCase):
     def testGet(self):
         self.assertEqual(self.resolve(b'GET', b'/forum?uid=37'),
             'forum(user:37)')
+
+    def testLower(self):
+        self.assertEqual(self.resolve(b'get', b'/forum?uid=37'),
+            'forum(user:37)')
+
+    def testNonExistent(self):
+        with self.assertRaises(web.MethodNotAllowed):
+            self.resolve(b'FIX', b'/forum?uid=37')
 
     @unittest.expectedFailure
     def testPatch(self):
