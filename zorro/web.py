@@ -214,7 +214,7 @@ class BaseResolver(metaclass=abc.ABCMeta):
         raise NotFound()
 
     def resolve(self, root):
-        node = root
+        self.resource = node = root
         for name in self:
             try:
                 node = node.resolve_local(name)
@@ -225,6 +225,7 @@ class BaseResolver(metaclass=abc.ABCMeta):
                 return _dispatch_page(node, node.__self__, self)
             elif kind is _RESOURCE_METHOD:
                 node, self.args = _dispatch_resource(node, node.__self__, self)
+                self.resource = node
                 if not isinstance(self, node.resolver_class):
                     newres =  node.resolver_class(self.request)
                     return newres.resolve(node)
