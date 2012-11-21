@@ -1,6 +1,7 @@
 import abc
 import logging
 import inspect
+from http.cookies import SimpleCookie
 from urllib.parse import urlparse, parse_qsl
 from itertools import zip_longest
 from collections import OrderedDict
