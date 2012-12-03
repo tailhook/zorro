@@ -354,7 +354,7 @@ class TestMethod(unittest.TestCase):
                 return 'PAGE:%s' % page
 
         class Forum(web.Resource):
-            resolver_class = web.MethodResolver
+            http_resolver_class = web.MethodResolver
 
             def __init__(self, user):
                 self.user = user

@@ -1,4 +1,5 @@
 import abc
+import json
 import logging
 import inspect
 from http.cookies import SimpleCookie
@@ -7,15 +8,18 @@ from itertools import zip_longest
 from collections import OrderedDict
 from functools import partial
 
-from .util import cached_property
+from .util import cached_property, marker_object
 
 
 log = logging.getLogger(__name__)
-sentinel = object()
 
-_PAGE_METHOD = object()
-_RESOURCE_METHOD = object()
-_RESOURCE = object()
+_LEAF_METHOD = marker_object('LEAF_METHOD')
+_LEAF_WSOCK_METHOD = marker_object('LEAF_WSOCK_METHOD')
+_LEAF_HTTP_METHOD = marker_object('LEAF_HTTP_METHOD')
+_RESOURCE_METHOD = marker_object('RESOURCE_METHOD')
+_RES_WSOCK_METHOD = marker_object('RES_WSOCK_METHOD')
+_RES_HTTP_METHOD = marker_object('RES_HTTP_METHOD')
+_RESOURCE = marker_object('RESOURCE')
 _FORM_CTYPE = b'application/x-www-form-urlencoded'
 
 
@@ -201,8 +205,14 @@ class ChildNotFound(Exception):
 
 class BaseResolver(metaclass=abc.ABCMeta):
 
-    def __init__(self, request):
+    _LEAF_METHODS = {_LEAF_METHOD}
+    _RES_METHODS = {_RESOURCE_METHOD}
+    resolver_class_attr = 'resolver_class'
+    default_method = None
+
+    def __init__(self, request, parent=None):
         self.request = request
+        self.parent = parent
 
     @abc.abstractmethod
     def __next__(self):
@@ -214,61 +224,114 @@ class BaseResolver(metaclass=abc.ABCMeta):
     def child_fallback(self):
         raise NotFound()
 
+    @abc.abstractmethod
+    def set_args(self, args):
+        pass
+
     def resolve(self, root):
         self.resource = node = root
         for name in self:
+            # assert name is not None, "Wrong name from {!r}".format(self)
             try:
                 node = node.resolve_local(name)
             except ChildNotFound:
                 node = self.child_fallback()
             kind = getattr(node, '_zweb', None)
-            if kind is _PAGE_METHOD:
-                return _dispatch_page(node, node.__self__, self)
-            elif kind is _RESOURCE_METHOD:
-                node, self.args = _dispatch_resource(node, node.__self__, self)
+            if kind in self._LEAF_METHODS:
+                return _dispatch_leaf(node, node.__self__, self)
+            elif kind in self._RES_METHODS:
+                node, tail = _dispatch_resource(node, node.__self__, self)
+                self.set_args(tail)
                 self.resource = node
-                if not isinstance(self, node.resolver_class):
-                    newres =  node.resolver_class(self.request)
+                res_class = getattr(node, self.resolver_class_attr, None)
+                if not isinstance(self, res_class):
+                    newres = res_class(self.request, self)
                     return newres.resolve(node)
             elif kind is _RESOURCE:
                 pass
             else:
+                log.debug("Wrong kind %r", kind)
                 raise NotFound()  # probably impossible but ...
-        if(hasattr(node, 'index')
-            and getattr(node.index, '_zweb', None) is _PAGE_METHOD):
-            return _dispatch_page(node.index, node, self)
+
+
+        if self.default_method is not None:
+            meth = getattr(node, self.default_method, None)
+            if(meth is not None
+                and getattr(meth, '_zweb', None) in self._LEAF_METHODS):
+                return _dispatch_leaf(node.index, node, self)
+
         raise NotFound()
 
 
 class PathResolver(BaseResolver):
 
-    def __init__(self, request):
-        super().__init__(request)
+    _LEAF_METHODS = {_LEAF_METHOD, _LEAF_HTTP_METHOD}
+    _RES_METHODS = {_RESOURCE_METHOD, _RES_HTTP_METHOD}
+    resolver_class_attr = 'http_resolver_class'
+    default_method = 'index'
+
+    def __init__(self, request, parent=None):
+        super().__init__(request, parent)
         path = request.parsed_uri.path.strip('/')
         if path:
             self.args = path.split('/')
         else:
-            self.args = ()
+            self.args = []
+        self.kwargs = dict(request.form_arguments)
 
     def __next__(self):
-        if not self.args:
+        try:
+            return self.args.pop(0)
+        except IndexError:
             raise StopIteration()
-        name, *args = self.args
-        self.args = args
-        return name
+
+    def set_args(self, args):
+        self.args = list(args)
 
 
 class MethodResolver(BaseResolver):
 
-    def __init__(self, request):
-        super().__init__(request)
-        self.args = ()
+    _LEAF_METHODS = {_LEAF_METHOD, _LEAF_HTTP_METHOD}
+    _RES_METHODS = {_RESOURCE_METHOD, _RES_HTTP_METHOD}
+    resolver_class_attr = 'http_resolver_class'
+    default_method = None
+
+    def __init__(self, request, parent=None):
+        super().__init__(request, parent)
+        self.args = parent.args
+        self.kwargs = dict(request.form_arguments)
 
     def __next__(self):
         return self.request.method.decode('ascii').upper()
 
     def child_fallback(self):
         raise MethodNotAllowed()
+
+    def set_args(self, args):
+        self.args = args
+
+
+class WebsockResolver(BaseResolver):
+
+    _LEAF_METHODS = {_LEAF_METHOD, _LEAF_WSOCK_METHOD}
+    _RES_METHODS = {_RESOURCE_METHOD, _RES_WSOCK_METHOD}
+    resolver_class_attr = 'websock_resolver_class'
+    default_method = 'default'
+
+    def __init__(self, request, parent=None):
+        super().__init__(request, parent)
+        self.parts = list(request.meth.split('.'))
+        self.args = request.args
+        self.kwargs = dict(request.kwargs)
+
+    def __next__(self):
+        try:
+            return self.parts.pop(0)
+        except IndexError:
+            raise StopIteration()
+
+    def set_args(self, args):
+        self.args = args
 
 
 class InternalRedirect(Exception, metaclass=abc.ABCMeta):
@@ -289,7 +352,8 @@ class PathRewrite(InternalRedirect):
 
 
 class Resource(object):
-    resolver_class = PathResolver
+    http_resolver_class = PathResolver
+    websock_resolver_class = WebsockResolver
     _zweb = _RESOURCE
 
     def resolve_local(self, name):
@@ -312,10 +376,11 @@ class Site(object):
 
     def _resolve(self, request):
         for i in self.resources:
-            res = i.resolver_class(request)
+            res = i.http_resolver_class(request)
             try:
                 return res.resolve(i)
             except NotFound as e:
+                log.exception("Not found")
                 continue
         else:
             raise NotFound()
@@ -356,14 +421,14 @@ def _dispatch_resource(fun, self, resolver):
     if deco is not None:
         return deco(self, resolver,
             partial(fun._zweb_deco_callee, self, resolver),
-            *resolver.args, **resolver.request.form_arguments)
+            *resolver.args, **resolver.kwargs)
     else:
         try:
             args, tail, kw = fun._zweb_sig(resolver,
-                *resolver.args, **resolver.request.form_arguments)
+                *resolver.args, **resolver.kwargs)
         except (TypeError, ValueError) as e:
             log.debug("Signature mismatch %r %r",
-                resolver.args, resolver.request.form_arguments,
+                resolver.args, resolver.kwargs,
                 exc_info=e)  # debug
             raise NotFound()
         else:
@@ -463,19 +528,33 @@ def resource(fun):
     return fun
 
 
-def _dispatch_page(fun, self, resolver):
+def http_resource(fun):
+    """Decorator to denote a method which returns HTTP-only resource"""
+    resource(fun)
+    fun._zweb = _RES_HTTP_METHOD
+    return fun
+
+
+def websock_resource(fun):
+    """Decorator to denote a method which returns Websocket-only resource"""
+    resource(fun)
+    fun._zweb = _RES_WSOCK_METHOD
+    return fun
+
+
+def _dispatch_leaf(fun, self, resolver):
     deco = getattr(fun, '_zweb_deco', None)
     if deco is not None:
         result = deco(self, resolver,
             partial(fun._zweb_deco_callee, self, resolver),
-            *resolver.args, **resolver.request.form_arguments)
+            *resolver.args, **resolver.kwargs)
     else:
         try:
             args, tail, kw = fun._zweb_sig(resolver,
-                *resolver.args, **resolver.request.form_arguments)
+                *resolver.args, **resolver.kwargs)
         except (TypeError, ValueError) as e:
             log.debug("Signature mismatch %r %r",
-                resolver.args, resolver.request.form_arguments,
+                resolver.args, resolver.kwargs,
                 exc_info=e)  # debug
             raise NotFound()
         else:
@@ -485,12 +564,26 @@ def _dispatch_page(fun, self, resolver):
     return result
 
 
-def page(fun):
+def endpoint(fun):
     """Decorator to denote a method which returns some result to the user"""
     if not hasattr(fun, '_zweb_post'):
         fun._zweb_post = []
-    fun._zweb = _PAGE_METHOD
+    fun._zweb = _LEAF_METHOD
     fun._zweb_sig = _compile_signature(fun, partial=False)
+    return fun
+
+
+def page(fun):
+    """Decorator to denote a method which works only for http"""
+    endpoint(fun)
+    fun._zweb = _LEAF_HTTP_METHOD
+    return fun
+
+
+def method(fun):
+    """Decorator to denote a method which works only for websockets"""
+    endpoint(fun)
+    fun._zweb = _LEAF_WSOCK_METHOD
     return fun
 
 
@@ -561,3 +654,92 @@ class Sticker(metaclass=abc.ABCMeta):
         super().register(sub)
         cls.__superseded[cls] = sub
 
+
+class WebsockCall(object):
+    MESSAGE = 'message'
+    CONNECT = 'connect'
+    DICONNECT = 'disconnect'
+    HEARTBEAT = 'heartbeat'
+    SYNC = 'sync'
+
+    def __init__(self, msgs):
+        cid = msgs[0]
+        kind = msgs[1]
+        meth = getattr(self, '_init_' + kind.decode('ascii'), None)
+        if meth:
+            meth(cid, *msgs[2:])
+
+    def _init_message(self, cid, body):
+        self.cid = cid
+        self.args = json.loads(body.decode('utf-8'))
+        self.meth = self.args.pop(0)
+        self.kwargs = self.args.pop(0)
+        self.request_id = self.kwargs.pop('#', None)
+        self.kind = self.MESSAGE
+
+    def _init_msgfrom(self, cid, cookie, body):
+        self.cid = cid
+        self.marker = cookie
+        self.args = json.loads(body.decode('utf-8'))
+        self.meth = self.args.pop(0)
+        self.kwargs = self.args.pop(0)
+        self.request_id = self.kwargs.pop('#', None)
+        self.kind = self.MESSAGE
+
+    def _init_connect(self, cid):
+        self.cid = cid
+        self.kind = self.CONNECT
+
+    def _init_disconnect(self, cid, cookie=None):
+        self.cid = cid
+        self.marker = cookie
+        self.kind = self.DISCONNECT
+
+    def _init_heartbeat(self, server_id):
+        self.server_id = server_id
+        self.kind = self.HEARTBEAT
+
+    def _init_sync(self, server_id, *users):
+        self.server_id = server_id
+        it = iter(users)
+        self.users = dict(zip(it, it))
+        self.kind = self.SYNC
+
+
+class Websockets(object):
+
+    def __init__(self, *, resources=(), output=None):
+        self.resources = resources
+        self.output = output
+
+    def _resolve(self, request):
+        for i in self.resources:
+            res = i.websock_resolver_class(request)
+            try:
+                return res.resolve(i)
+            except NotFound as e:
+                continue
+
+    def _safe_dispatch(self, request):
+        while True:
+            try:
+                result = self._resolve(request)
+                return ['_result', json.dumps(result)]
+            except NiceError as e:
+                return ['_error', e.client_data()]
+            except Exception as e:
+                log.exception("Can't process request %r", request)
+                return ['_internal_error']
+            else:
+                return ['_result', result]
+
+    def __call__(self, *args):
+        call = WebsockCall(args)
+        if call.kind is WebsockCall.MESSAGE:
+            result = self._safe_dispatch(call)
+            if call.request_id is not None:
+                output.send(call, json.dumps(result))
+        else:
+            meth = getattr(self, 'handle_' + WebsockCall.kind, None)
+            if meth is not None:
+                meth()
