@@ -6,6 +6,7 @@ from collections import namedtuple
 from zorro import web
 
 
+
 class TestLocalDispatch(unittest.TestCase):
 
     def setUp(self):
@@ -419,6 +420,45 @@ class TestMethod(unittest.TestCase):
         with self.assertRaises(web.NotFound):
             self.resolve(b'PATCH', b'/forum?uid=9')
 
+
+class TestDictResource(unittest.TestCase):
+
+    def setUp(self):
+
+        class Request(web.Request):
+            def __init__(self, uri):
+                self.uri = uri
+
+        class About(web.Resource):
+            """Uses default resolver"""
+
+            @web.page
+            def index(self):
+                return 'blank'
+
+            @web.page
+            def more(self, page:str):
+                return 'PAGE:%s' % page
+
+        self.site = web.Site(request_class=Request, resources=[
+            web.DictResource(about=About()),
+            ])
+        self.Request = Request
+
+    def resolve(self, uri):
+        return self.site._resolve(self.Request(uri))
+
+    def testAbout(self):
+        self.assertEqual(self.resolve(b'/about'), 'blank')
+
+    def testLessArgs(self):
+        with self.assertRaises(web.NotFound):
+            self.resolve(b'/about/more')
+        with self.assertRaises(web.NotFound):
+            self.resolve(b'/about/more/')
+
+    def testLonger(self):
+        self.assertEqual(self.resolve(b'/about/more/abc'), 'PAGE:abc')
 
 if __name__ == '__main__':
     unittest.main()

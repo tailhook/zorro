@@ -351,6 +351,14 @@ class PathRewrite(InternalRedirect):
         del request.parsed_uri
 
 
+class ResourceInterface(metaclass=abc.ABCMeta):
+
+    @abc.abstractmethod
+    def resolve_local(self, name):
+        """Returns child resource or method or raises ChildNotFound"""
+
+
+@ResourceInterface.register
 class Resource(object):
     http_resolver_class = PathResolver
     websock_resolver_class = WebsockResolver
@@ -366,6 +374,21 @@ class Resource(object):
         if kind is not None:
             return target
         raise ChildNotFound()
+
+
+@ResourceInterface.register
+class DictResource(dict):
+
+    http_resolver_class = PathResolver
+    websock_resolver_class = WebsockResolver
+    _zweb = _RESOURCE
+
+
+    def resolve_local(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise ChildNotFound()
 
 
 class Site(object):
