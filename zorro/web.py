@@ -203,6 +203,10 @@ class ChildNotFound(Exception):
     """Raised by resolve_local to notify that there is not such child"""
 
 
+class NiceError(Exception):
+    """Error that is safe to present to user"""
+
+
 class BaseResolver(metaclass=abc.ABCMeta):
 
     _LEAF_METHODS = {_LEAF_METHOD}
@@ -403,7 +407,6 @@ class Site(object):
             try:
                 return res.resolve(i)
             except NotFound as e:
-                log.exception("Not found")
                 continue
         else:
             raise NotFound()
@@ -681,7 +684,7 @@ class Sticker(metaclass=abc.ABCMeta):
 class WebsockCall(object):
     MESSAGE = 'message'
     CONNECT = 'connect'
-    DICONNECT = 'disconnect'
+    DISCONNECT = 'disconnect'
     HEARTBEAT = 'heartbeat'
     SYNC = 'sync'
 
@@ -763,6 +766,6 @@ class Websockets(object):
             if call.request_id is not None:
                 output.send(call, json.dumps(result))
         else:
-            meth = getattr(self, 'handle_' + WebsockCall.kind, None)
+            meth = getattr(self, 'handle_' + call.kind, None)
             if meth is not None:
-                meth()
+                meth(call)
