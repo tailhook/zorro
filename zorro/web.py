@@ -252,7 +252,7 @@ class BaseResolver(metaclass=abc.ABCMeta):
                     newres = res_class(self.request, self)
                     return newres.resolve(node)
             elif kind is _RESOURCE:
-                pass
+                self.resource = node
             else:
                 log.debug("Wrong kind %r", kind)
                 raise NotFound()  # probably impossible but ...
@@ -745,24 +745,27 @@ class Websockets(object):
                 return res.resolve(i)
             except NotFound as e:
                 continue
+        raise NotFound()
 
     def _safe_dispatch(self, request):
-        while True:
-            try:
-                result = self._resolve(request)
-            except NiceError as e:
-                return ['_error', e.client_data()]
-            except Exception as e:
-                log.exception("Can't process request %r", request)
-                return ['_internal_error']
-            else:
-                return ['_result', json.dumps(result)]
+        try:
+            result = self._resolve(request)
+        except NiceError as e:
+            return ['_error', e.client_data()]
+        except NotFound as e:
+            return ['_not_found', request.meth]
+        except Exception as e:
+            log.exception("Can't process request %r", request)
+            return ['_internal_error']
+        else:
+            return ['_result', result]
 
     def __call__(self, *args):
         call = WebsockCall(args)
         if call.kind is WebsockCall.MESSAGE:
             result = self._safe_dispatch(call)
             if call.request_id is not None:
+                result.insert(1, call.request_id)
                 self.output.send(call, json.dumps(result))
         else:
             meth = getattr(self, 'handle_' + call.kind, None)
