@@ -750,21 +750,20 @@ class Websockets(object):
         while True:
             try:
                 result = self._resolve(request)
-                return ['_result', json.dumps(result)]
             except NiceError as e:
                 return ['_error', e.client_data()]
             except Exception as e:
                 log.exception("Can't process request %r", request)
                 return ['_internal_error']
             else:
-                return ['_result', result]
+                return ['_result', json.dumps(result)]
 
     def __call__(self, *args):
         call = WebsockCall(args)
         if call.kind is WebsockCall.MESSAGE:
             result = self._safe_dispatch(call)
             if call.request_id is not None:
-                output.send(call, json.dumps(result))
+                self.output.send(call, json.dumps(result))
         else:
             meth = getattr(self, 'handle_' + call.kind, None)
             if meth is not None:
