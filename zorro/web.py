@@ -194,8 +194,8 @@ class CompletionRedirect(Redirect):
     def headers(self):
         sup = super().headers()
         if self.cookie is not None:
-            sup += (b'Set-Cookie\0'
-                    + self.cookie.output(header='').encode('ascii') + b'\0')
+            sup += self.cookie.output(header='Set-Cookie\0',
+                                      sep='\0').encode('ascii') + b'\0'
         return sup
 
 
