@@ -300,7 +300,20 @@ class Resolver(object):
     # CONVENTIONAL FUNCTIONS
 
     def gethostbyname(self, name):
-        return self.resolve(name)[0].ip
+        records = self.resolve(name)
+        by_name = {}
+        for rec in records:
+            if rec.name == name and isinstance(rec, ARecord):
+                return rec.ip
+            by_name[rec.name] = rec
+        while True:
+            rec = by_name.get(name, None)
+            if isinstance(rec, CNAMERecord):
+                name = rec.canonical_name
+            elif isinstance(rec, ARecord):
+                return rec.ip
+            else:
+                raise DNSServerFailure(records)
 
 
 class Config(object):
