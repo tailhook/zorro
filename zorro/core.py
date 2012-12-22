@@ -27,6 +27,11 @@ FUTURE_PENDING = marker_object('FUTURE_PENDING')
 
 os_errors = (IOError, OSError)
 
+
+class TimeoutError(Exception):
+    pass
+
+
 class Zorrolet(greenlet.greenlet):
     __slots__ = ('hub', 'cleanup')
 
@@ -359,7 +364,7 @@ class Future(object):
                     self.set(result)
             gethub().do_spawn(future)
 
-    def get(self):
+    def get(self, timeout=None):
         val = self._value
         if val is not FUTURE_PENDING:
             if val is FUTURE_EXCEPTION:
@@ -370,9 +375,14 @@ class Future(object):
         cur.cleanup.append(self._listeners.remove)
         self._listeners.append(cur)
         hub = cur.hub
+        if timeout is not None:
+            targ = time.time() + timeout
+            cur.cleanup.append(hub._timeouts.add(targ, cur))
         del cur # no cycles
         hub._self.switch()
         val = self._value
+        if val is FUTURE_PENDING:
+            raise TimeoutError()
         if val is FUTURE_EXCEPTION:
             raise self._exception
         else:

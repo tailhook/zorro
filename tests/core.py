@@ -14,6 +14,18 @@ class Core(Test):
         self.assertEquals(f.get(), (None, 234))
 
     @passive
+    def test_future_timeo_ok(self):
+        f = self.z.Future(lambda:(self.z.sleep(0.1),234))
+        self.assertEquals(f.get(timeout=0.2), (None, 234))
+
+    @passive
+    def test_future_timeo_raised(self):
+        f = self.z.Future(lambda:(self.z.sleep(0.2),234))
+        with self.assertRaises(self.z.TimeoutError):
+            f.get(timeout=0.1)
+        self.assertEquals(f.get(), (None, 234))
+
+    @passive
     def test_future_user(self):
         f = self.z.Future()
         self.hub.do_spawn(lambda: f.set('hello'))
