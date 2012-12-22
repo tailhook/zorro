@@ -342,11 +342,14 @@ class Condition(object):
             tsk = self._queue[0]
             tsk.hub.queue_task(tsk)
 
-    def wait(self):
+    def wait(self, timeout=None):
         cur = greenlet.getcurrent()
         cur.cleanup.append(self._queue.remove)
         self._queue.append(cur)
         hub = cur.hub
+        if timeout is not None:
+            targ = time.time() + timeout
+            cur.cleanup.append(hub._timeouts.add(targ, cur))
         del cur # no cycles
         hub._self.switch()
 

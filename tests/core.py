@@ -57,6 +57,18 @@ class Core(Test):
         self.assertEquals(f._value, 'hello')
 
     @passive
+    def test_condition_timeo(self):
+        cond = self.z.Condition()
+        r = []
+        self.hub.do_spawn(lambda:
+            (r.append('1'), self.z.sleep(0.2),
+             r.append('3'), cond.notify()))
+        cond.wait(timeout=0.1)
+        r.append('2')
+        cond.wait(timeout=0.2)
+        self.assertEquals(r, ['1', '2', '3'])
+
+    @passive
     def test_thrash(self):
         f = self.z.Future()
         self.hub.do_spawn(lambda: f.get())
