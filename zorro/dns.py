@@ -297,6 +297,11 @@ class Resolver(object):
         rr.parse_from(data, pos, ln)
         return rr, pos+ln
 
+    # CONVENTIONAL FUNCTIONS
+
+    def gethostbyname(self, name):
+        return self.resolve(name)[0].ip
+
 
 class Config(object):
 
