@@ -18,6 +18,7 @@ type_to_code = {
     'PTR': b'\x00\x0C',
     'MX': b'\x00\x0F',
     'TXT': b'\x00\x10',
+    'SRV': b'\x00\x21',
     }
 IN_CLASS = b'\x00\x01'
 code_to_type = {v: k for k, v in type_to_code.items()}
@@ -77,6 +78,11 @@ class Record(object):
     def parse_from(self, data, pos, ln):
         pass
 
+    def __repr__(self):
+        return '<RR {} {}>'.format(self.type,
+            ', '.join(k + '=' + repr(getattr(self, k))
+            for k in self.__slots__))
+
 
 class ARecord(Record):
     __slots__ = ('ip',)
@@ -84,11 +90,6 @@ class ARecord(Record):
 
     def parse_from(self, data, pos, ln):
         self.ip = socket.inet_ntoa(data[pos:pos+ln])
-
-    def __repr__(self):
-        return '<RR {} {}>'.format(self.type,
-            ', '.join(k + '=' + repr(getattr(self, k))
-            for k in self.__slots__))
 
 
 class MXRecord(Record):
@@ -99,17 +100,12 @@ class MXRecord(Record):
         self.priority, = struct.unpack_from('>H', data, pos)
         self.server, _ = _read_name(data, pos+2)
 
-    def __repr__(self):
-        return '<RR {} {}>'.format(self.type,
-            ', '.join(k + '=' + repr(getattr(self, k))
-            for k in self.__slots__))
-
 
 class CNAMERecord(Record):
     __slots__ = ('canonical_name',)
     type = 'CNAME'
 
-    def parse_form(self, data, pos, ln):
+    def parse_from(self, data, pos, ln):
         self.canonical_name = _read_name(data, pos)[0]
 
 
@@ -117,7 +113,7 @@ class NSRecord(Record):
     __slots__ = ('authoritative_name',)
     type = 'NS'
 
-    def parse_form(self, data, pos, ln):
+    def parse_from(self, data, pos, ln):
         self.authoritative_name = _read_name(data, pos)[0]
 
 
@@ -125,7 +121,7 @@ class PTRRecord(Record):
     __slots__ = ('pointer_target',)
     type = 'PTR'
 
-    def parse_form(self, data, pos, ln):
+    def parse_from(self, data, pos, ln):
         self.pointer_target = _read_name(data, pos)[0]
 
 
@@ -133,8 +129,18 @@ class TXTRecord(Record):
     __slots__ = ('text',)
     type = 'TXT'
 
-    def parse_form(self, data, pos, ln):
+    def parse_from(self, data, pos, ln):
         self.text = data[pos:pos+ln].decode('utf-8')
+
+
+class SRVRecord(Record):
+    __slots__ = ('priority', 'weight', 'port', 'target')
+    type = 'SRV'
+
+    def parse_from(self, data, pos, ln):
+        fields = struct.unpack_from('>HHH', data, pos)
+        self.priority, self.weight, self.port = fields
+        self.target, _ = _read_name(data, pos+6)
 
 
 rr_types = {
@@ -144,6 +150,7 @@ rr_types = {
     'PTR': PTRRecord,
     'TXT': TXTRecord,
     'MX': MXRecord,
+    'SRV': SRVRecord,
     }
 
 
