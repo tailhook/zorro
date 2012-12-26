@@ -39,6 +39,10 @@ class RequestChannel(channel.PipelinedReqChannel):
                 raise
         self._start()
 
+    def _close_channel(self):
+        self._sock.close()
+        super()._close_channel()
+
     def sender(self):
         buf = bytearray()
 
