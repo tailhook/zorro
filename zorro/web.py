@@ -244,10 +244,14 @@ class BaseResolver(metaclass=abc.ABCMeta):
             if kind in self._LEAF_METHODS:
                 return _dispatch_leaf(node, node.__self__, self)
             elif kind in self._RES_METHODS:
-                node, tail = _dispatch_resource(node, node.__self__, self)
+                newnode, tail = _dispatch_resource(node, node.__self__, self)
                 self.set_args(tail)
-                self.resource = node
-                res_class = getattr(node, self.resolver_class_attr, None)
+                self.resource = newnode
+                res_class = getattr(newnode, self.resolver_class_attr, None)
+                if res_class is None:
+                    raise RuntimeError("Value {!r} returned from"
+                        " {!r} is not a resource".format(newnode, node))
+                node = newnode
                 if not isinstance(self, res_class):
                     newres = res_class(self.request, self)
                     return newres.resolve(node)
