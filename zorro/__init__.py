@@ -1,4 +1,4 @@
-from .core import Hub, gethub, Future, Condition, Lock
+from .core import Hub, gethub, Future, Condition, Lock, TimeoutError
 from contextlib import contextmanager
 from functools import wraps
 

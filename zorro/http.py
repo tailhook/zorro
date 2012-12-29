@@ -39,6 +39,10 @@ class RequestChannel(channel.PipelinedReqChannel):
                 raise
         self._start()
 
+    def _close_channel(self):
+        self._sock.close()
+        super()._close_channel()
+
     def sender(self):
         buf = bytearray()
 
@@ -61,7 +65,7 @@ class RequestChannel(channel.PipelinedReqChannel):
                 else:
                     raise
             if not bytes:
-                raise EOFError()
+                raise EOFError("Connection closed by peer")
             del buf[:bytes]
 
     def receiver(self):
@@ -81,7 +85,7 @@ class RequestChannel(channel.PipelinedReqChannel):
                         pos[0] = 0
                     bytes = sock.recv(self.BUFSIZE)
                     if not bytes:
-                        raise EOFError()
+                        raise EOFError("Connection closed by peer")
                     add_chunk(bytes)
                 except socket.error as e:
                     if e.errno in (errno.EAGAIN, errno.EINTR):
@@ -90,6 +94,40 @@ class RequestChannel(channel.PipelinedReqChannel):
                         raise
                 else:
                     break
+
+        def readchunked():
+            result = bytearray()
+            while True:
+                while True:
+                    idx = buf.find(b'\r\n', pos[0])
+                    if idx >= 0:
+                        break
+                    readmore()
+                line = buf[pos[0]:idx]
+                pos[0] = idx
+                try:
+                    num = int(line, 16)
+                except ValueError:
+                    raise EOFError("Wrong number of bytes, or some extension")
+                if num == 0:
+                    break
+                pos[0] += 2  # eat endline
+                while len(buf) < pos[0] + num:
+                    readmore()
+                result.extend(buf[pos[0]:pos[0]+num])
+                pos[0] += num
+                if buf[pos[0]:pos[0]+2] != b'\r\n':
+                    raise EOFError("Chunk is not terminated properly")
+                pos[0] += 2
+            while True:
+                idx = buf.find(b'\r\n\r\n', pos[0])
+                if idx >= 0:
+                    break
+                readmore()
+            pos[0] = idx + 4  # Can't be any headers,
+                              # but let's ignore them anyway
+            return result
+
 
         def readrequest():
             while True:
@@ -118,7 +156,24 @@ class RequestChannel(channel.PipelinedReqChannel):
                         headers[k] = v.strip()
                 else:
                     raise EOFError("Wrong http headers")
-            clen = int(headers.get('Content-Length', '0'))
+            te = headers.get('Transfer-Encoding', '')
+            if te == 'chunked':
+                return status, headers, readchunked()
+            elif te:
+                raise EOFError('Wrong transfer encoding {!r}'.format(te))
+
+            clen = headers.get('Content-Length', None)
+
+            if clen is None:
+                if headers.get('Connection', '').lower() != 'close':
+                    raise EOFError('Impossible to determine content length')
+                try:
+                    while True:
+                        readmore()
+                except EOFError:
+                     return status, headers, buf
+
+            clen = int(clen)
             if clen < 0:
                 raise EOFError("Wrong content length")
             while pos[0] + clen > len(buf):

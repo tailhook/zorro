@@ -21,6 +21,8 @@ class BaseChannel(object):
         self._alive = True
         self._pending = deque()
         self._cond = Condition()
+        self._sender_alive = True
+        self._receiver_alive = True
 
     def _start(self):
         hub = gethub()
@@ -30,10 +32,13 @@ class BaseChannel(object):
     def __bool__(self):
         return self._alive
 
+    def _close_channel(self):
+        pass
+
     def _sender_wrapper(self):
         try:
             self.sender()
-        except (EOFError, ShutdownException, GreenletExit):
+        except (EOFError, ShutdownException, GreenletExit) as e:
             pass
         except Exception:
             log.exception("Error in %r's sender", self)
@@ -41,11 +46,15 @@ class BaseChannel(object):
             if self._alive:
                 self._alive = False
                 self._stop_producing()
+            self._sender_alive = False
+            if not self._receiver_alive:
+                # both are down
+                self._close_channel()
 
     def _receiver_wrapper(self):
         try:
             self.receiver()
-        except (EOFError, ShutdownException, GreenletExit):
+        except (EOFError, ShutdownException, GreenletExit) as e:
             pass
         except Exception:
             log.exception("Error in %r's receiver", self)
@@ -53,6 +62,10 @@ class BaseChannel(object):
             if self._alive:
                 self._alive = False
                 self._stop_producing()
+            self._receiver_alive = False
+            if not self._sender_alive:
+                # both are down
+                self._close_channel()
 
     def _stop_producing(self):
         pass
@@ -86,6 +99,7 @@ class PipelinedReqChannel(BaseChannel):
         del self._producing
         for num, fut in prod:
             fut.throw(PipeError())
+        self._cond.notify()  # wake up consumer if it waits for messages
 
     def produce(self, value):
         if not self._alive:

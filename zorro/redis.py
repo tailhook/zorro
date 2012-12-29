@@ -56,6 +56,10 @@ class RedisChannel(channel.PipelinedReqChannel):
         assert self.request('*2\r\n$6\r\nSELECT\r\n${0}\r\n{1}\r\n'
             .format(len(db), db).encode('ascii')).get() == 'OK'
 
+    def _close_channel(self):
+        self._sock.close()
+        super()._close_channel()
+
     def sender(self):
         buf = bytearray()
 

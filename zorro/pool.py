@@ -3,11 +3,8 @@ from functools import partial
 from greenlet import getcurrent, GreenletExit
 
 from .core import gethub, Condition
-from . import sleep
+from . import sleep, TimeoutError
 
-
-class TimeoutError(Exception):
-    pass
 
 class Pool(object):
 
