@@ -73,6 +73,10 @@ class TestResolve(unittest.TestCase):
             def forums(self):
                 return 'forums'
 
+            @web.page
+            def request(self, req:web.Request):
+                return req
+
         class Forum(web.Resource):
 
             def __init__(self, id):
@@ -97,6 +101,11 @@ class TestResolve(unittest.TestCase):
 
     def testIndex(self):
         self.assertEqual(self.resolve(b'/'), 'index')
+
+    def testRequest(self):
+        req = self.Request(b'/request')
+        nreq = self.site._resolve(req)
+        self.assertIs(req, nreq)
 
     def testPage(self):
         self.assertEqual(self.resolve(b'/about'), 'about')

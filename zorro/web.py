@@ -73,6 +73,10 @@ class Request(object):
         cobj = SimpleCookie(self.cookie.decode('ascii', 'ignore'))
         return dict((k, cobj[k].value) for k in cobj)
 
+    @classmethod
+    def create(cls, resolver):
+        return resolver.request
+
 
 class WebException(Exception):
     """Base for all exceptions which render error code (and page) to client"""
@@ -735,6 +739,10 @@ class WebsockCall(object):
         self.users = dict(zip(it, it))
         self.kind = self.SYNC
 
+    @classmethod
+    def create(cls, resolver):
+        return resolver.request
+
 
 class Websockets(object):
 
@@ -775,3 +783,7 @@ class Websockets(object):
             meth = getattr(self, 'handle_' + call.kind, None)
             if meth is not None:
                 meth(call)
+
+
+Sticker.register(Request)
+Sticker.register(WebsockCall)
