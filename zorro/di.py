@@ -162,6 +162,9 @@ class DependencyInjector(object):
     def __getitem__(self, name):
         return self._provides[name]
 
+    def __contains__(self, name):
+        return name in self._provides
+
     def clone(self, **renames):
         di = self.__class__()
         mypro = self._provides
