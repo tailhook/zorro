@@ -5,7 +5,6 @@ import inspect
 from http.cookies import SimpleCookie
 from urllib.parse import urlparse, parse_qsl
 from itertools import zip_longest
-from collections import defaultdict
 from functools import partial
 
 from .util import cached_property, marker_object
@@ -27,11 +26,17 @@ class LegacyMultiDict(object):
     """Utilitary class which wrap dict to make it suitable for old utilities
     like wtforms"""
 
-    def __init__(self, pairs):
-        dic = defaultdict(list)
+    def __init__(self, pairs=None):
+        self._dic = {}
+        if not pairs is None:
+            self.update(pairs)
+
+    def update(self, pairs):
         for k, v in pairs:
-            dic[k].append(v)
-        self._dic = dict(dic)
+            if k not in self._dic:
+                self._dic[k] = [v]
+            else:
+                self._dic[k].append(v)
 
     def getlist(self, k):
         return list(self._dic[k])
@@ -43,8 +48,8 @@ class LegacyMultiDict(object):
         for k in self._dic:
             yield k
 
-    def __getitem__(self, k):
-        return self._dic[k][0]
+    def __len__(self):
+        return len(self._dic)
 
 
 class Request(object):
@@ -61,22 +66,24 @@ class Request(object):
         return urlparse(self.uri.decode('ascii'))
 
     @cached_property
-    def _argument_tuples(self):
-        arguments = []
+    def form_arguments(self):
+        arguments = {}
         if hasattr(self, 'uri'):
-            arguments.extend(parse_qsl(self.parsed_uri.query))
+            arguments.update(parse_qsl(self.parsed_uri.query))
         body = getattr(self, 'body', None)
         if body and getattr(self, 'content_type', None) == _FORM_CTYPE:
-            arguments.extend(parse_qsl(self.body.decode('ascii')))
+            arguments.update(parse_qsl(self.body.decode('ascii')))
         return arguments
 
     @cached_property
-    def form_arguments(self):
-        return dict(self._argument_tuples)
-
-    @cached_property
     def legacy_arguments(self):
-        return LegacyMultiDict(self._argument_tuples)
+        arguments = LegacyMultiDict()
+        if hasattr(self, 'uri'):
+            arguments.update(parse_qsl(self.parsed_uri.query))
+        body = getattr(self, 'body', None)
+        if body and getattr(self, 'content_type', None) == _FORM_CTYPE:
+            arguments.update(parse_qsl(self.body.decode('ascii')))
+        return arguments
 
     @cached_property
     def cookies(self):
