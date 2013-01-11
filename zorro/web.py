@@ -5,7 +5,7 @@ import inspect
 from http.cookies import SimpleCookie
 from urllib.parse import urlparse, parse_qsl
 from itertools import zip_longest
-from collections import OrderedDict
+from collections import defaultdict
 from functools import partial
 
 from .util import cached_property, marker_object
@@ -27,11 +27,14 @@ class LegacyMultiDict(object):
     """Utilitary class which wrap dict to make it suitable for old utilities
     like wtforms"""
 
-    def __init__(self, dic):
-        self._dic = dic
+    def __init__(self, pairs):
+        dic = defaultdict(list)
+        for k, v in pairs:
+            dic[k].append(v)
+        self._dic = dict(dic)
 
     def getlist(self, k):
-        return [self._dic[k]]
+        return list(self._dic[k])
 
     def __contains__(self, k):
         return k in self._dic
@@ -39,6 +42,9 @@ class LegacyMultiDict(object):
     def __iter__(self):
         for k in self._dic:
             yield k
+
+    def __getitem__(self, k):
+        return self._dic[k][0]
 
 
 class Request(object):
@@ -55,18 +61,22 @@ class Request(object):
         return urlparse(self.uri.decode('ascii'))
 
     @cached_property
-    def form_arguments(self):
-        arguments = {}
+    def _argument_tuples(self):
+        arguments = []
         if hasattr(self, 'uri'):
-            arguments.update(parse_qsl(self.parsed_uri.query))
+            arguments.extend(parse_qsl(self.parsed_uri.query))
         body = getattr(self, 'body', None)
         if body and getattr(self, 'content_type', None) == _FORM_CTYPE:
-            arguments.update(parse_qsl(self.body.decode('ascii')))
+            arguments.extend(parse_qsl(self.body.decode('ascii')))
         return arguments
 
     @cached_property
+    def form_arguments(self):
+        return dict(self._argument_tuples)
+
+    @cached_property
     def legacy_arguments(self):
-        return LegacyMultiDict(self.form_arguments)
+        return LegacyMultiDict(self._argument_tuples)
 
     @cached_property
     def cookies(self):
