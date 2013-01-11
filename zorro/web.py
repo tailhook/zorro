@@ -5,7 +5,6 @@ import inspect
 from http.cookies import SimpleCookie
 from urllib.parse import urlparse, parse_qsl
 from itertools import zip_longest
-from collections import OrderedDict
 from functools import partial
 
 from .util import cached_property, marker_object
@@ -27,11 +26,20 @@ class LegacyMultiDict(object):
     """Utilitary class which wrap dict to make it suitable for old utilities
     like wtforms"""
 
-    def __init__(self, dic):
-        self._dic = dic
+    def __init__(self, pairs=None):
+        self._dic = {}
+        if not pairs is None:
+            self.update(pairs)
+
+    def update(self, pairs):
+        for k, v in pairs:
+            if k not in self._dic:
+                self._dic[k] = [v]
+            else:
+                self._dic[k].append(v)
 
     def getlist(self, k):
-        return [self._dic[k]]
+        return list(self._dic[k])
 
     def __contains__(self, k):
         return k in self._dic
@@ -39,6 +47,9 @@ class LegacyMultiDict(object):
     def __iter__(self):
         for k in self._dic:
             yield k
+
+    def __len__(self):
+        return len(self._dic)
 
 
 class Request(object):
@@ -66,7 +77,13 @@ class Request(object):
 
     @cached_property
     def legacy_arguments(self):
-        return LegacyMultiDict(self.form_arguments)
+        arguments = LegacyMultiDict()
+        if hasattr(self, 'uri'):
+            arguments.update(parse_qsl(self.parsed_uri.query))
+        body = getattr(self, 'body', None)
+        if body and getattr(self, 'content_type', None) == _FORM_CTYPE:
+            arguments.update(parse_qsl(self.body.decode('ascii')))
+        return arguments
 
     @cached_property
     def cookies(self):
