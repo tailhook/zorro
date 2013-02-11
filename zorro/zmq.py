@@ -252,7 +252,7 @@ def plug(hub, io_threads=DEFAULT_IO_THREADS):
     assert not hasattr(hub, 'zmq_context')
     ctx = hub.zmq_context = zmq.Context(io_threads)
     hub.change_poller(zmq.Poller, filedes=_get_fd,
-        POLLIN=zmq.POLLIN, POLLOUT=zmq.POLLOUT)
+        POLLIN=zmq.POLLIN, POLLOUT=zmq.POLLOUT, POLLERR=zmq.POLLERR, POLLHUP=0)
     core.os_errors += (ZMQError,)
     hub.log_plugged(ctx, name='zmq_context')
     return ctx

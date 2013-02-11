@@ -32,6 +32,10 @@ class TimeoutError(Exception):
     pass
 
 
+class WaitingError(Exception):
+    """Is raised when poll returned POLLHUP or POLLERR"""
+
+
 class Zorrolet(greenlet.greenlet):
     __slots__ = ('hub', 'cleanup')
 
@@ -85,10 +89,14 @@ class Hub(object):
             self._poller = EpollWrapper(select.epoll())
             self.POLLIN = select.EPOLLIN
             self.POLLOUT = select.EPOLLOUT
+            self.POLLHUP = select.EPOLLHUP
+            self.POLLERR = select.EPOLLERR
         except AttributeError:
             self._poller = select.poll()
             self.POLLIN = select.POLLIN
             self.POLLOUT = select.POLLOUT
+            self.POLLHUP = select.POLLHUP
+            self.POLLERR = select.POLLERR
             self._log.info("Using poller %r", self._poller)
         self._filedes = methodcaller('fileno')
         self._timeouts = priorityqueue()
@@ -104,7 +112,7 @@ class Hub(object):
 
     # global methods
 
-    def change_poller(self, cls, POLLIN, POLLOUT,
+    def change_poller(self, cls, *, POLLIN, POLLOUT, POLLERR, POLLHUP,
         filedes=methodcaller('fileno')):
         self._log.info("Changing poller from %r to %r",
             self._poller.__class__, cls)
@@ -113,6 +121,8 @@ class Hub(object):
         self._poller = cls()
         self.POLLIN = POLLIN
         self.POLLOUT = POLLOUT
+        self.POLLHUP = POLLHUP
+        self.POLLERR = POLLERR
         self._filedes = filedes
         for k in set(self._in_sockets).union(self._out_sockets):
             msk = 0
@@ -225,18 +235,29 @@ class Hub(object):
                 return
             raise
         else:
+            POLLOUT = self.POLLOUT
+            POLLIN = self.POLLIN
+            POLLERR = self.POLLHUP | self.POLLERR
             for fd, ev in items:
-                if ev & self.POLLOUT:
+                if ev & POLLOUT:
                     if fd in self._out_sockets:
                         task = self._out_sockets[fd][0]
                         self.queue_task(task, 'read')
-                if ev & self.POLLIN:
+                if ev & POLLIN:
                     if fd in self._in_sockets:
                         task = self._in_sockets[fd][0]
                         self.queue_task(task, 'write')
                     elif fd == self._control_fd:
                         self._control[0].recv(1024)
                         # throw it, just need wake up
+                if ev & POLLERR:
+                    if fd in self._in_sockets:
+                        task = self._in_sockets[fd][0]
+                        self.queue_task(task, 'err')
+                    if fd in self._out_sockets:
+                        task = self._out_sockets[fd][0]
+                        self.queue_task(task, 'err')
+
 
     def timeouts(self):
         if not self._timeouts:
@@ -289,7 +310,9 @@ class Hub(object):
         self._check_mask(fd, new=len(items) == 1 and fd not in odic)
         del let
         if not more:
-            self._self.switch()
+            val = self._self.switch()
+            if val == 'err':
+                raise WaitingError()
 
     def do_read(self, sock, more=False):
         self._queue_sock(sock, self._in_sockets, self._out_sockets, more=more)
