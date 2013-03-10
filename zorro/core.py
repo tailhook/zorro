@@ -432,7 +432,7 @@ class Future(object):
         for one in lst:
             gethub().queue_task(one)
 
-    def check(self, value):
+    def check(self):
         return self._value is FUTURE_PENDING
 
 class Lock(Condition):
