@@ -5,8 +5,10 @@ import os
 from collections import namedtuple
 import logging
 import abc
+import time
 
 from .core import gethub, Future, TimeoutError
+from . import sleep
 
 
 log = logging.getLogger(__name__)
@@ -191,10 +193,15 @@ class Resolver(object):
             return fut
         fut = Future()
         self.cur_requests[key] = fut
-        self._do_resolve(name, typ, fut)
+        try:
+            self._do_resolve(name, typ, fut)
+        finally:
+            del self.cur_requests[key]
         return fut
 
     def resolve(self, name, typ='A'):
+        if self.config.check():
+            self.cache.clear()
         cache = self.config.hosts.get(name, None)
         if cache is not None:
             return [cache]
@@ -225,7 +232,10 @@ class Resolver(object):
             key = rid, name, typ
             self.udp_requests[key] = fut
             try:
-                self._sock.sendto(query, (n, 53))
+                try:
+                    self._sock.sendto(query, (n, 53))
+                except OSError as e:
+                    continue
                 try:
                     fut.get(timeout=self.config.options['timeout'])
                 except TimeoutError:
@@ -234,6 +244,8 @@ class Resolver(object):
                     break
             finally:
                 del self.udp_requests[key]
+        if fut.check():
+            fut.throw(DNSRefused("No server available"))
 
     def _receiver(self):
         while True:
@@ -266,7 +278,7 @@ class Resolver(object):
             return  # we only request IN class
         pos += 4
         fut = self.udp_requests.get((head.id, name, typ), None)
-        if fut is None:
+        if fut is None or not fut.check():
             return  # late or unsolicited reply
         err = head.flags & F_RCODE
         if err:
@@ -275,6 +287,7 @@ class Resolver(object):
                 fut.throw(exc())
             else:
                 fut.throw(DNSError("Resolving error: {}".format(err)))
+            return
         rrs = []
         for i in range(head.ancount):
             rr, pos = self._read_rr(data, pos)
@@ -318,7 +331,12 @@ class Resolver(object):
 
 class Config(object):
 
-    def __init__(self):
+    def __init__(self, check_files_time=1):
+        self.check_files_time = check_files_time
+        self.files_to_check = {}
+        self.clear()
+
+    def clear(self):
         self.hosts = {}
         self.ns = []
         self.search = []
@@ -330,16 +348,37 @@ class Config(object):
             'rotate': False,
             }
 
+    def check(self):
+        if self.last_check + self.check_files_time < time.time():
+            for fn, mtime in self.files_to_check.items():
+                if os.path.getmtime(fn) != mtime:
+                    break
+            else:
+                return False
+            self.clear()
+            self.load_from_files(
+                hosts=self.hosts_file,
+                resolv=self.resolv_file)
+            return True
+        return False
+
     @classmethod
     def system_config(cls):
         self = cls()
-        self.read_hosts_file()
-        self.read_resolv_file()
-        self.apply_environment()
+        self.load_from_files()
         return self
+
+    def load_from_files(self, hosts='/etc/hosts', resolv='/etc/resolv.conf'):
+        self.last_check = time.time()
+        self.hosts_file = hosts
+        self.resolv_file = resolv
+        self.read_hosts_file(hosts)
+        self.read_resolv_file(resolv)
+        self.apply_environment()
 
     def read_hosts_file(self, fn='/etc/hosts'):
         with open(fn, 'rt') as f:
+            self.files_to_check[fn] = os.path.getmtime(fn)
             for line in f:
                 line = line.strip()
                 if not line or line.startswith((';', '#')):
@@ -350,6 +389,7 @@ class Config(object):
 
     def read_resolv_file(self, fn='/etc/resolv.conf'):
         with open(fn, 'rt') as f:
+            self.files_to_check[fn] = os.path.getmtime(fn)
             for line in f:
                 line = line.strip()
                 if line.startswith((';', '#')):
