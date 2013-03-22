@@ -10,6 +10,7 @@ import zmq
 from zmq import *
 
 from . import core, channel
+from .core import gethub
 
 
 DEFAULT_IO_THREADS = 1
@@ -61,7 +62,7 @@ def send_data(sock, data, address=None):
             sock.send_multipart(_rep, zmq.NOBLOCK)
         except zmq.ZMQError as e:
             if e.errno == errno.EAGAIN:
-                hub.do_write(sock)
+                gethub().do_write(sock)
                 continue
             elif e.errno == errno.EINTR:
                 continue
