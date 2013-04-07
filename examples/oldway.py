@@ -1,10 +1,12 @@
 import redis
 import zmq
 
+
 ctx = zmq.Context(1)
 sock = ctx.socket(zmq.REP)
 sock.connect('tcp://localhost:7004')
 r = redis.Redis()
+
 
 while True:
     arg, = sock.recv_multipart()

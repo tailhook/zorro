@@ -3,12 +3,14 @@ import socket
 
 from .base import Test, passive
 
+
 class Redis(Test):
 
     def setUp(self):
         super().setUp()
         import zorro.redis
         self.r = zorro.redis.Redis(db=13)
+
 
 class SingleThread(Redis):
 
@@ -81,6 +83,7 @@ class BigTest(Redis):
         for i in f:
             i.get()
         print("TOTAL TIME", time.time() - old)
+
 
 if __name__ == '__main__':
     import unittest

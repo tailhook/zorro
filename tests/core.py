@@ -1,5 +1,6 @@
 from .base import Test, passive
 
+
 class Core(Test):
     test_timeout = 0.25
 
@@ -99,6 +100,7 @@ class Core(Test):
         self.hub.do_spawn(two)
         self.z.sleep(0.2)
         self.assertEquals(res, [1,2,3,4])
+
 
 if __name__ == '__main__':
     import unittest

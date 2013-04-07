@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 class PipeError(Exception):
     pass
 
+
 class ShutdownException(Exception):
     pass
 
@@ -86,6 +87,7 @@ class BaseChannel(object):
     def get_pending_requests(self):
         while self._pending:
             yield self._pending.popleft()
+
 
 class PipelinedReqChannel(BaseChannel):
 

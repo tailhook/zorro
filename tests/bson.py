@@ -1,5 +1,7 @@
 import unittest
+
 from zorro.mongodb import bson
+
 
 class TestBson(unittest.TestCase):
 

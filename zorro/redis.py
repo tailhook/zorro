@@ -1,9 +1,9 @@
+import socket
+import errno
+
 from .core import gethub, Lock
 from . import channel
 from .util import setcloexec
-
-import socket
-import errno
 
 
 convert = {
@@ -26,8 +26,10 @@ def encode_command(buf, parts):
         add(b'\r\n')
     return buf
 
+
 class RedisError(Exception):
     pass
+
 
 class RedisChannel(channel.PipelinedReqChannel):
     BUFSIZE = 16384
@@ -164,7 +166,6 @@ class RedisChannel(channel.PipelinedReqChannel):
 
         while True:
             self.produce(readone())
-
 
 
 class Redis(object):

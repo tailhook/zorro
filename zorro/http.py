@@ -128,7 +128,6 @@ class RequestChannel(channel.PipelinedReqChannel):
                               # but let's ignore them anyway
             return result
 
-
         def readrequest():
             while True:
                 idx = buf.find(b'\r\n\r\n', pos[0])
