@@ -686,11 +686,6 @@ class Sticker(metaclass=abc.ABCMeta):
         """Creates an object of this class based on resolver"""
 
     @classmethod
-    @abc.abstractmethod
-    def create(cls, resolver):
-        """Creates an object of this class based on resolver"""
-
-    @classmethod
     def supersede(cls, sub):
         oldsup = cls.__superseeded.get(cls, None)
         if oldsup is not None:
