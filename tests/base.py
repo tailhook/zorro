@@ -3,6 +3,7 @@ import threading
 import sys
 from functools import wraps, partial
 
+
 def interactive(zfun):
     def wrapper(fun):
         @wraps(fun)
@@ -12,6 +13,7 @@ def interactive(zfun):
             fun(self, *a, **kw)
         return wrapping
     return wrapper
+
 
 def passive(zfun):
     @wraps(zfun)
@@ -30,6 +32,7 @@ def passive(zfun):
             if exc:
                 raise exc[0]
     return wrapping
+
 
 class Test(unittest.TestCase):
     test_timeout = 1

@@ -6,7 +6,6 @@ from collections import namedtuple
 from zorro import web
 
 
-
 class TestLocalDispatch(unittest.TestCase):
 
     def setUp(self):
@@ -25,7 +24,6 @@ class TestLocalDispatch(unittest.TestCase):
                 return 'invisible'
 
         self.r = MyRes()
-
 
     def testOK(self):
         self.assertEqual(self.r.resolve_local('hello'), self.r.hello)
@@ -468,6 +466,7 @@ class TestDictResource(unittest.TestCase):
 
     def testLonger(self):
         self.assertEqual(self.resolve(b'/about/more/abc'), 'PAGE:abc')
+
 
 if __name__ == '__main__':
     unittest.main()

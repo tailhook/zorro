@@ -70,6 +70,7 @@ class Simple(Mysql):
         with self.assertRaises(self.z.mysql.MysqlError):
             self.m.execute('hello world')
 
+
 class TestTypes(Mysql):
 
     @passive
@@ -136,7 +137,6 @@ class TestTypes(Mysql):
             "t"*520,
             ])
 
-
     @passive
     def test_char(self):
         self.exact_test('CHAR(10)', [
@@ -171,8 +171,6 @@ class TestTypes(Mysql):
             datetime.datetime(2011, 3, 6, 12, 34),
             datetime.datetime(2011, 3, 6, 12, 34, 47),
             ])
-
-
 
     def exact_test(self, typ, values):
         self.m.execute('drop table if exists test')
@@ -249,7 +247,6 @@ class TestTypes(Mysql):
 
 class TestFormat(unittest.TestCase):
 
-
     def test_simple(self):
         from zorro.mysql import Formatter
         fmt = Formatter().format
@@ -276,7 +273,6 @@ class TestFormat(unittest.TestCase):
         self.assertEqual(fmt('DATEADD({0!c}, {1})',
             'date', timedelta(1, 3678, 33)),
             "DATEADD(date, INTERVAL '1 01:01:18.000033' DAY_MICROSECOND)")
-
 
 
 if __name__ == '__main__':

@@ -1,10 +1,12 @@
 import zmq
 import MySQLdb
 
+
 ctx = zmq.Context(1)
 sock = ctx.socket(zmq.REP)
 sock.connect('tcp://localhost:7004')
 mysql = MySQLdb.connect(host='localhost', user='test', db='test_zorro')
+
 
 while True:
     uri, = sock.recv_multipart()

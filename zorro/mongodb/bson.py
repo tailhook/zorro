@@ -11,6 +11,7 @@ class ObjectID(bytes):
     def __repr__(self):
         return 'ObjectID.fromhex("{}")'.format(hexlify(self).decode('ascii'))
 
+
 def _unpack(char):
     def register(fun):
         _unpack_dict[char] = fun

@@ -1,12 +1,12 @@
-from ..core import gethub, Lock
-from .. import channel
-from . import bson
-from ..util import setcloexec
-
 import socket
 import errno
 import struct
 import os.path
+
+from ..core import gethub, Lock
+from .. import channel
+from . import bson
+from ..util import setcloexec
 
 
 OP_REPLY = 1
