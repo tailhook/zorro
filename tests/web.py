@@ -212,6 +212,17 @@ class TestDecorators(unittest.TestCase):
                 return meth(a, b=b, c=69)
             return wrapper
 
+        def check_access(real_checker):
+            def decorator(fun):
+                @web.preprocessor(fun)
+                def wrapper(self, resolver, *args, **kw):
+                    if real_checker(User.create(resolver)):
+                        return None
+                    return 'denied'
+
+                return wrapper
+            return decorator
+
         self.last_latency = None
         def timeit(fun):
             @wraps(fun)
@@ -256,8 +267,10 @@ class TestDecorators(unittest.TestCase):
                     ad, user.id, position)
 
             @web.resource
-            def forum(self, user:User):
-                return Forum(user)
+            @add_suffix('denied')
+            @check_access(lambda u: u.id % 2 == 0)
+            def forum(self, user:User, id:int=-1):
+                return Forum(user, id)
 
             @form
             @web.page
@@ -273,12 +286,21 @@ class TestDecorators(unittest.TestCase):
 
         class Forum(web.Resource):
 
-            def __init__(self, user):
+            def __init__(self, user, id):
                 self.user = user
+                self.id = id
 
             @web.page
             def index(self):
                 return "forum(user:{})".format(self.user.id)
+
+            @web.page
+            @add_suffix('allowed')
+            @check_access(lambda u: u.id % 3 == 0)
+            @check_access(lambda u: u.id % 7 == 0)
+            def topic(self, id:int):
+                return "forum(user:{}, forum:{}, topic:{})".format(
+                    self.user.id, self.id, id)
 
         self.site = web.Site(request_class=Request, resources=[Root()])
         self.Request = Request
@@ -290,7 +312,7 @@ class TestDecorators(unittest.TestCase):
         self.assertEqual(self.resolve(b'/about'), 'prefix:[about]')
 
     def testResourceSticker(self):
-        self.assertEqual(self.resolve(b'/forum?uid=7'), 'forum(user:7)')
+        self.assertEqual(self.resolve(b'/forum?uid=14'), 'forum(user:14)')
 
     def testSticker(self):
         self.assertEqual(self.resolve(b'/profile?uid=3'), 'profile(3)')
@@ -328,6 +350,16 @@ class TestDecorators(unittest.TestCase):
     def test2DecoInvent(self):
         self.assertEqual(self.resolve(b'/form2?uid=13'),
             'prefix:[form2(1, 2, 69, 13)]')
+
+    def testCheckAccess(self):
+        self.assertEqual(self.resolve(b'/forum/1/topic/2?uid=42'),
+            '[forum(user:42, forum:1, topic:2)]:allowed')
+        self.assertEqual(self.resolve(b'/forum/1/topic/2?uid=6'),
+            '[denied]:allowed')
+        self.assertEqual(self.resolve(b'/forum/1/topic/2?uid=21'),
+            '[denied]:denied')
+        self.assertEqual(self.resolve(b'/forum/1/topic/2?uid=14'),
+            '[denied]:allowed')
 
 
 class TestMethod(unittest.TestCase):

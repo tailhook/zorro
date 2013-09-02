@@ -19,6 +19,7 @@ _RESOURCE_METHOD = marker_object('RESOURCE_METHOD')
 _RES_WSOCK_METHOD = marker_object('RES_WSOCK_METHOD')
 _RES_HTTP_METHOD = marker_object('RES_HTTP_METHOD')
 _RESOURCE = marker_object('RESOURCE')
+_INTERRUPT = marker_object('INTERRUPT')
 _FORM_CTYPE = b'application/x-www-form-urlencoded'
 
 
@@ -238,6 +239,7 @@ class BaseResolver(metaclass=abc.ABCMeta):
     def __init__(self, request, parent=None):
         self.request = request
         self.parent = parent
+        self.resource = None
 
     @abc.abstractmethod
     def __next__(self):
@@ -266,6 +268,8 @@ class BaseResolver(metaclass=abc.ABCMeta):
                 return _dispatch_leaf(node, node.__self__, self)
             elif kind in self._RES_METHODS:
                 newnode, tail = _dispatch_resource(node, node.__self__, self)
+                if newnode is _INTERRUPT:
+                    return tail  # tail is actual result in this case
                 self.set_args(tail)
                 self.resource = newnode
                 res_class = getattr(newnode, self.resolver_class_attr, None)
@@ -468,22 +472,33 @@ class Site(object):
 
 
 def _dispatch_resource(fun, self, resolver):
-    deco = getattr(fun, '_zweb_deco', None)
-    if deco is not None:
-        return deco(self, resolver,
-            partial(fun._zweb_deco_callee, self, resolver),
-            *resolver.args, **resolver.kwargs)
-    else:
-        try:
-            args, tail, kw = fun._zweb_sig(resolver,
+    preproc = getattr(fun, '_zweb_pre', ())
+    result = None
+    for prefun in preproc:
+        result = prefun(self, resolver, *resolver.args, **resolver.kwargs)
+        if result is not None:
+            break
+    if result is None:
+        deco = getattr(fun, '_zweb_deco', None)
+        if deco is not None:
+            return deco(self, resolver,
+                partial(fun._zweb_deco_callee, self, resolver),
                 *resolver.args, **resolver.kwargs)
-        except (TypeError, ValueError) as e:
-            log.debug("Signature mismatch %r %r",
-                resolver.args, resolver.kwargs,
-                exc_info=e)  # debug
-            raise NotFound()
         else:
-            return fun(*args, **kw), tail
+            try:
+                args, tail, kw = fun._zweb_sig(resolver,
+                    *resolver.args, **resolver.kwargs)
+            except (TypeError, ValueError) as e:
+                log.debug("Signature mismatch %r %r",
+                    resolver.args, resolver.kwargs,
+                    exc_info=e)  # debug
+                raise NotFound()
+            else:
+                return fun(*args, **kw), tail
+    else:
+        for proc in fun._zweb_post:
+            result = proc(self, resolver, result)
+        return _INTERRUPT, result
 
 
 class ReprHack(str):
@@ -548,8 +563,14 @@ def _compile_signature(fun, partial):
         if self:
             self = False
     if not varpos and partial:
-        fun_params.append(inspect.Parameter('__tail__',
-            kind=inspect.Parameter.VAR_POSITIONAL))
+        for i, p in enumerate(fun_params):
+            if p.kind == inspect.Parameter.KEYWORD_ONLY:
+                fun_params.insert(i, inspect.Parameter('__tail__',
+                    kind=inspect.Parameter.VAR_POSITIONAL))
+                break
+        else:
+            fun_params.append(inspect.Parameter('__tail__',
+                kind=inspect.Parameter.VAR_POSITIONAL))
     if not varkw:
         fun_params.append(inspect.Parameter('__kw__',
             kind=inspect.Parameter.VAR_KEYWORD))
@@ -594,22 +615,29 @@ def websock_resource(fun):
 
 
 def _dispatch_leaf(fun, self, resolver):
-    deco = getattr(fun, '_zweb_deco', None)
-    if deco is not None:
-        result = deco(self, resolver,
-            partial(fun._zweb_deco_callee, self, resolver),
-            *resolver.args, **resolver.kwargs)
-    else:
-        try:
-            args, tail, kw = fun._zweb_sig(resolver,
+    preproc = getattr(fun, '_zweb_pre', ())
+    result = None
+    for prefun in preproc:
+        result = prefun(self, resolver, *resolver.args, **resolver.kwargs)
+        if result is not None:
+            break
+    if result is None:
+        deco = getattr(fun, '_zweb_deco', None)
+        if deco is not None:
+            result = deco(self, resolver,
+                partial(fun._zweb_deco_callee, self, resolver),
                 *resolver.args, **resolver.kwargs)
-        except (TypeError, ValueError) as e:
-            log.debug("Signature mismatch %r %r",
-                resolver.args, resolver.kwargs,
-                exc_info=e)  # debug
-            raise NotFound()
         else:
-            result = fun(*args, **kw)
+            try:
+                args, tail, kw = fun._zweb_sig(resolver,
+                    *resolver.args, **resolver.kwargs)
+            except (TypeError, ValueError) as e:
+                log.debug("Signature mismatch %r %r",
+                    resolver.args, resolver.kwargs,
+                    exc_info=e)  # debug
+                raise NotFound()
+            else:
+                result = fun(*args, **kw)
     for proc in fun._zweb_post:
         result = proc(self, resolver, result)
     return result
@@ -639,10 +667,38 @@ def method(fun):
 
 
 def postprocessor(fun):
+    """A decorator that accepts method's output and processes it
+
+    Works only on leaf nodes. Typical use cases are:
+
+    * turn dict of variables into a JSON
+    * render a template from the dict.
+    """
     if not hasattr(fun, '_zweb_post'):
         fun._zweb_post = []
     def wrapper(proc):
         fun._zweb_post.append(proc)
+        return fun
+    return wrapper
+
+
+def preprocessor(fun):
+    """A decorators that runs before request
+
+    When preprocessor returns None, request is processed as always. If
+    preprocessor return not None it's return value treated as return value
+    of a leaf node (even if it's resource) including executing all
+    postprocessors.
+
+    Works both on resources and leaf nodes. Typical use casees are:
+
+    * access checking
+    * caching
+    """
+    if not hasattr(fun, '_zweb_pre'):
+        fun._zweb_pre = []
+    def wrapper(proc):
+        fun._zweb_pre.append(proc)
         return fun
     return wrapper
 
