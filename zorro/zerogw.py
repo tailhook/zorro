@@ -1,3 +1,8 @@
+"""
+Everything here except JSONWebsockOutput class is deprecated in favor of
+zorro.web
+"""
+
 import json
 import abc
 import logging

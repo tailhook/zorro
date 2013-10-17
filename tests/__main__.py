@@ -4,6 +4,7 @@ import pkgutil
 import tests
 import logging
 
+
 logging.basicConfig(filename='tests.log', filemode='w', level=logging.DEBUG)
 suite = unittest.TestSuite()
 loader = unittest.TestLoader()

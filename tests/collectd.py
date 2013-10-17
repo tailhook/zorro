@@ -1,9 +1,10 @@
-from .base import Test, interactive, passive
-
 import os
-import zmq
 import time
 import socket
+
+import zmq
+
+from .base import Test, interactive, passive
 
 
 TEST_SOCKET = '/tmp/zorro-collectd-test'

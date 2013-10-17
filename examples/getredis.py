@@ -1,8 +1,10 @@
 from zorro import Hub, redis, zmq
 import logging; logging.basicConfig()
 
+
 hub = Hub()
 redis.plug(hub, host='localhost', db=0)
+
 
 def reply(url):
     for i in range(10):
@@ -14,6 +16,7 @@ def reply(url):
         val += b' '
         val += str(nvisits).encode('utf-8')
         return bytes(val)
+
 
 @hub.run
 def main():

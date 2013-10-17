@@ -2,6 +2,7 @@ import fcntl
 from heapq import heappush, heappop
 from collections import deque
 
+
 class orderedset(object):
 
     def __init__(self):
@@ -26,6 +27,7 @@ class orderedset(object):
 
     def __bool__(self):
         return bool(self.deque)
+
 
 class priorityqueue(object):
 
@@ -57,6 +59,7 @@ class priorityqueue(object):
     def __bool__(self):
         return bool(self.heap)
 
+
 try:
     from socket import socketpair
 except ImportError:
@@ -74,6 +77,7 @@ except ImportError:
         a.setblocking(0)
         b.setblocking(0)
         return a, b
+
 
 def socket_pair():
     a, b = socketpair()

@@ -1,7 +1,10 @@
-from .base import Test, interactive, passive
-import zmq
 import time
 import pickle
+
+import zmq
+
+from .base import Test, interactive, passive
+
 
 class TestZeromq(Test):
 
@@ -296,6 +299,7 @@ class TestRPC(Test):
         self.assertEqual(sock.recv_multipart(), [b'jim.hello_world'])
         sock.send_multipart([b'_exception',
             repr(ValueError('test')).encode('ascii')])
+
 
 if __name__ == '__main__':
     import unittest

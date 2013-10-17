@@ -1,4 +1,3 @@
-import greenlet
 import heapq
 import time
 import threading
@@ -10,6 +9,8 @@ from collections import deque, defaultdict
 from functools import partial
 from operator import methodcaller
 from math import ceil
+
+import greenlet
 
 from .util import priorityqueue, orderedset, socket_pair, marker_object
 
@@ -355,6 +356,7 @@ def gethub():
     let = greenlet.getcurrent()
     return let.hub
 
+
 class Condition(object):
 
     def __init__(self):
@@ -375,6 +377,7 @@ class Condition(object):
             cur.cleanup.append(hub._timeouts.add(targ, cur))
         del cur # no cycles
         hub._self.switch()
+
 
 class Future(object):
     def __init__(self, fun=None):
@@ -434,6 +437,7 @@ class Future(object):
 
     def check(self):
         return self._value is FUTURE_PENDING
+
 
 class Lock(Condition):
     def __init__(self):

@@ -1,6 +1,7 @@
-from .base import Test, interactive
 import time
 import http.server
+
+from .base import Test, interactive
 
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):

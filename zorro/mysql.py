@@ -136,6 +136,7 @@ def _write_lcbytes(buf, data):
         buf += struct.pack('<Q', ln)
     buf += data
 
+
 def _read_bintime(buf, pos):
     ln = buf[pos]
     assert ln >= 8
@@ -143,11 +144,13 @@ def _read_bintime(buf, pos):
     assert not sign and not days, 'Timedeltas are not supported'
     return time(hour, min, sec), pos+ln+1
 
+
 def _read_bindate(buf, pos):
     ln = buf[pos]
     assert ln >= 4
     year, month, day = struct.unpack_from('<H2B', buf, pos+1)
     return date(year, month, day), pos+ln+1
+
 
 def _read_bindatetime(buf, pos):
     ln = buf[pos]
@@ -291,12 +294,14 @@ class Formatter(string.Formatter):
         else:
             return super().convert_field(value, conversion)
 
+
 _formatter = Formatter()
 mysql_format = _formatter.format
 mysql_vformat = _formatter.vformat
 
 _Field = namedtuple('_Field', 'catalog db table org_table name org_name'
         ' charsetnr length type flags decimals default bin_key')
+
 class Field(_Field):
     __slots__ = ()
 
@@ -355,6 +360,7 @@ class Resultset(object):
         for rpacket in self.reply[self.nfields+2:-1]:
             yield tuple(self._parse_row(rpacket))
 
+
 class BinaryResultset(Resultset):
 
     def __init__(self, cls, reply, nfields, extra):
@@ -380,7 +386,6 @@ class BinaryResultset(Resultset):
                     raise RuntimeError('{} is not supported'.format(f.type))
                 val, pos = read(rpacket, pos)
                 yield val
-
 
 
 class PreparedStatement(object):
@@ -652,7 +657,6 @@ class Channel(channel.PipelinedReqChannel):
         del self._cur_producing[:]
         del self._state
         self._producing.popleft()[1].set(res)
-
 
 
 class Mysql(object):
