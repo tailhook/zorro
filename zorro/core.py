@@ -141,7 +141,7 @@ class Hub(object):
 
     def stop(self):
         """Stop all services, and wait for other tasks to complete"""
-        self._log.warn("Stop called from thread ``%s'' and %r",
+        self._log.warning("Stop called from thread ``%s'' and %r",
             threading.current_thread().name, greenlet.getcurrent())
         self.stopping = True
         if threading.current_thread().ident != self._thread:
@@ -160,7 +160,7 @@ class Hub(object):
 
     def crash(self):
         """Rude stop of hub at next iteration"""
-        self._log.warn("Crash called from thread ``%s'' and %r",
+        self._log.warning("Crash called from thread ``%s'' and %r",
             threading.current_thread().name, greenlet.getcurrent())
         self.stopped = True
         if threading.current_thread().ident != self._thread:
@@ -171,7 +171,7 @@ class Hub(object):
         self.stopped = False
         self._self = greenlet.getcurrent()
         self._thread = threading.current_thread().ident
-        self._log.warn("Starting in thread ``%s'' and %r",
+        self._log.warning("Starting in thread ``%s'' and %r",
             threading.current_thread().name, self._self)
         for f in self._start_tasks:
             self.do_spawn(f)
@@ -183,13 +183,13 @@ class Hub(object):
             self.timeouts()
 
             if self.stopped:
-                self._log.warn("Breaking main loop")
+                self._log.warning("Breaking main loop")
                 break
             elif self.stopping and self._services:
-                self._log.warn("Stopping services")
+                self._log.warning("Stopping services")
                 self.shutdown_tasks(self._services, self._tasks)
             elif not self._tasks and not self._services and self._helpers:
-                self._log.warn("No more active tasks, stopping helpers")
+                self._log.warning("No more active tasks, stopping helpers")
                 self.shutdown_tasks(self._helpers, self._tasks)
             if not self._tasks and not self._services:
                 break
@@ -197,7 +197,7 @@ class Hub(object):
             if not self._queue:
                 self.io()
 
-        self._log.warn("Hub stopped")
+        self._log.warning("Hub stopped")
         self.stopping = True
         self.stopped = True
 
