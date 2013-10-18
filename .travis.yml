@@ -4,4 +4,4 @@ python:
 - "3.3"
 services: mongodb
 install: "pip install pyzmq greenlet"
-script: "python -m unittest discover"
+script: "python -m unittest discover -v"
