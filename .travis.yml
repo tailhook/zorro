@@ -3,7 +3,4 @@ python:
 - "3.2"
 - "3.3"
 install: "pip install pyzmq"
-scripts: "python -m tests"install: "pip install pyzmq"
-scripts: "python -m tests"install: "pip install pyzmq"
-scripts: "python -m tests"install: "pip install pyzmq"
-scripts: "python -m tests"
+script: "python -m tests"
