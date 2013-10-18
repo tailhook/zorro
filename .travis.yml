@@ -2,5 +2,5 @@ language: python
 python:
 - "3.2"
 - "3.3"
-install: "pip install pyzmq"
+install: "pip install pyzmq greenlet"
 script: "python -m unittest discover"
