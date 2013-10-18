@@ -12,6 +12,14 @@ from zmq import *
 from . import core, channel
 from .core import gethub
 
+try:
+    REP_SOCKET = zmq.XREP
+except AttributeError:
+    REP_SOCKET = zmq.ROUTER
+try:
+    REQ_SOCKET = zmq.XREQ
+except AttributeError:
+    REQ_SOCKET = zmq.DEALER
 
 DEFAULT_IO_THREADS = 1
 
@@ -113,7 +121,7 @@ def rep_listener(sock, callback):
 
 
 def rep_socket(callback):
-    sock = Socket(context(), zmq.XREP)
+    sock = Socket(context(), REP_SOCKET)
     core.gethub().do_spawnservice(partial(rep_listener, sock, callback))
     return sock
 
@@ -169,7 +177,7 @@ class ReqChannel(channel.MuxReqChannel):
     def __init__(self):
         super().__init__()
         self.init_id()
-        self._sock = Socket(context(), zmq.XREQ)
+        self._sock = Socket(context(), REQ_SOCKET)
         self._start()
 
     def init_id(self):
