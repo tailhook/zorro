@@ -131,7 +131,7 @@ class TestPools(Test):
     def test_pool_rep(self):
         self.data = []
         ctx = zmq.Context(1)
-        sock = ctx.socket(zmq.XREQ)
+        sock = ctx.socket(zmq.DEALER)
         sock.bind('ipc:///tmp/zorro-pool-test')
         sock.send_multipart([b'', b'1', b"0.1"])
         sock.send_multipart([b'', b'2', b"0.1"])
