@@ -72,16 +72,16 @@ class TestZeromq(Test):
         sock = self.z.zmq.sub_socket(self.subscriber)
         sock.bind('tcp://127.0.0.1:9999')
         sock.setsockopt(self.z.zmq.SUBSCRIBE, b"")
-        self.z.sleep(0.1)
         self.pub = self.z.zmq.pub_socket()
         self.pub.connect('tcp://127.0.0.1:9999')
-        self.pub.publish('hello', 'world')
         f = self.z.Future()
         sock = self.z.zmq.sub_socket(f.set)
         sock.bind('tcp://127.0.0.1:9998')
         sock.setsockopt(self.z.zmq.SUBSCRIBE, b"")
         self.pub2 = self.z.zmq.pub_socket()
         self.pub2.connect('tcp://127.0.0.1:9998')
+        self.z.sleep(0.1)
+        self.pub.publish('hello', 'world')
         self.assertEqual(f.get(),
             b"(b'real', b'real', b'real', b'hello', b'world')")
 
@@ -95,15 +95,15 @@ class TestZeromq(Test):
     def test_pushpull(self):
         sock = self.z.zmq.pull_socket(self.puller)
         sock.bind('tcp://127.0.0.1:9999')
-        self.z.sleep(0.1)
         self.push = self.z.zmq.push_socket()
         self.push.connect('tcp://127.0.0.1:9999')
-        self.push.push('hello', 'world')
         f = self.z.Future()
         sock = self.z.zmq.pull_socket(f.set)
         sock.bind('tcp://127.0.0.1:9998')
         self.push2 = self.z.zmq.push_socket()
         self.push2.connect('tcp://127.0.0.1:9998')
+        self.z.sleep(0.1)
+        self.push.push('hello', 'world')
         self.assertEqual(f.get(),
             b"(b'real', b'real', b'real', b'hello', b'world')")
 
