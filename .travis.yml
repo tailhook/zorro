@@ -2,5 +2,5 @@ language: python
 python:
 - "3.3"
 services: mongodb
-install: "pip install pyzmq greenlet"
+install: "pip install pyzmq greenlet --use-mirrors"
 script: "python -m unittest discover -v"
