@@ -97,13 +97,13 @@ class TestZeromq(Test):
         sock.bind('tcp://127.0.0.1:9999')
         self.push = self.z.zmq.push_socket()
         self.push.connect('tcp://127.0.0.1:9999')
+        self.push2 = self.z.zmq.push_socket()
+        self.z.sleep(0.1)
+        self.push.push('hello', 'world')
         f = self.z.Future()
         sock = self.z.zmq.pull_socket(f.set)
         sock.bind('tcp://127.0.0.1:9998')
-        self.push2 = self.z.zmq.push_socket()
         self.push2.connect('tcp://127.0.0.1:9998')
-        self.z.sleep(0.1)
-        self.push.push('hello', 'world')
         self.assertEqual(f.get(),
             b"(b'real', b'real', b'real', b'hello', b'world')")
 
