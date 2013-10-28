@@ -26,24 +26,28 @@ class Simple(Test):
     def do_request(self):
         self.z.sleep(0.1)
         cli = self.z.http.HTTPClient('localhost', 9997)
-        self.assertEqual(cli.request('/').body, b'HELLO')
+        self.got_value = cli.request('/').body
 
     @interactive(do_request)
     def test_req(self):
         import zorro.http
         srv = http.server.HTTPServer(('localhost', 9997), RequestHandler)
         srv.handle_request()
+        self.thread.join(1)
+        self.assertEqual(self.got_value, b'HELLO')
 
     def do_fetch(self):
         self.z.sleep(0.1)
         cli = self.z.http.HTTPClient('localhost', 9997)
-        self.assertEqual(cli.request('/', method='FETCH').body, b'HELLO')
+        self.fetched_value = cli.request('/', method='FETCH').body
 
     @interactive(do_fetch)
     def test_fetch(self):
         import zorro.http
         srv = http.server.HTTPServer(('localhost', 9997), RequestHandler)
         srv.handle_request()
+        self.thread.join(1)
+        self.assertEqual(self.fetched_value, b'HELLO')
 
 
 if __name__ == '__main__':
