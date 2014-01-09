@@ -129,31 +129,6 @@ class DependencyInjector(object):
             meth()
         return inst
 
-    def inject_restricted(self, inst):
-        """Injects dependencies, and propagates only this instance's
-        dependencies
-        """
-        # TODO(tailhook) may be optimize if names == _provides.keys()
-        di = self.__class__()
-        mypro = self._provides
-        pro = di._provides
-        for name in names:
-            pro[name] = mypro[name]
-        for name, alias in renames.items():
-            pro[name] = mypro[alias]
-        inst.__zorro_di__ = di
-        deps = getattr(inst, '__zorro_depends__', None)
-        if deps:
-            for attr, dep in deps.items():
-                val = pro[dep.name]
-                if not isinstance(val, dep.type):
-                    raise RuntimeError("Wrong provider for {!r}".format(val))
-                setattr(inst, attr, val)
-        meth = getattr(inst, '__zorro_di_done__', None)
-        if meth is not None:
-            meth()
-        return inst
-
     def __setitem__(self, name, value):
         if name in self._provides:
             raise RuntimeError("Two providers for {!r}".format(name))
