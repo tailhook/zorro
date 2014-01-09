@@ -1,3 +1,4 @@
+=====
 Zorro
 =====
 
@@ -6,18 +7,24 @@ Mostly suitable for servers of some kind.
 
 API's implemented so far:
 
- * Redis
- * Zeromq
- * Mongo
+* Zeromq
+* Redis
+* MySQL
+* Mongo
+* HTTP/HTTPS (client)
+* DNS (async)
 
-Primitives implemented so far:
+Features:
 
- * Lock (actually, mutex, locked using `with` statement)
- * Condition (condition variable, use `wait()` and `notify()`)
- * Future (either give it function to constructor or use `set()` for setting and
-    `get()` for waiting for the value)
+* Only for Python3 (works with 3.2, needs 3.3 for zorro.web)
+* Full set of synchronisation primitives (incl. Futures, Lock, Conditions...)
+* Pipelining for all network protocols
+* Pure python implementation (still outperforms C implementations for many
+  tasks because of pipelining)
+* Basic web framework for zerogw
+* Pluggable polling mechanisms
 
-Usage:
+Usage::
 
     from zorro import Hub
 
@@ -27,7 +34,7 @@ Usage:
         # setup other coroutines here
         return
 
-Basic zmq replier example. Each reply will get it's own microthread:
+Basic zmq replier example. Each reply will get it's own microthread::
 
     from zorro import Hub, zmq
 
@@ -50,20 +57,19 @@ Basic zmq replier example. Each reply will get it's own microthread:
         sock = zmq.rep_socket(replier)
         sock.connect('tcp://somewhere')
 
-Some advanced redis usage example:
+Some advanced redis usage example::
 
     from zorro import Hub, redis, Future
     from functools import partial
 
     hub = Hub()
-    redis.plug(hub, host='localhost', db=13)
+    redis = redis.Redis()
 
     def getkey(index):
         # Semi-parallel requests will be pipelined so it's quite fast
-        r = redis.redis()
-        a = r.execute('INCR', 'test:{0}'.format(index-1), 1)
-        r.execute('DECR', 'test:{0}'.format(index+1), a)
-        return int(r.execute('GET', 'test:{0}'.format(index)))
+        a = redis.execute('INCR', 'test:{0}'.format(index-1), 1)
+        redis.execute('DECR', 'test:{0}'.format(index+1), a)
+        return int(redis.execute('GET', 'test:{0}'.format(index)))
 
     @hub.run
     def main():
