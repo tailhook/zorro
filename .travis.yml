@@ -1,6 +1,8 @@
 language: python
 python:
 - "3.3"
-services: mongodb
+services:
+- mongodb
+- redis-server
 install: "pip install pyzmq greenlet --use-mirrors"
 script: "python -m unittest discover -v"
